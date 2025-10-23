@@ -1,9 +1,10 @@
 package logger
 
 import (
-	"go.uber.org/zap"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 func Test_ExampleUsage(t *testing.T) {
@@ -38,7 +39,7 @@ func Test_ExampleUsage(t *testing.T) {
 		zap.String("requestId", requestId),
 		zap.String("error", "数据库无法链接详情"))
 
-	zap.L().Info("数据库已经连接",
+	zap.L().Info("Database connected",
 		zap.String("requestId", requestId),
 		zap.String("error", "数据库已经连接"))
 }

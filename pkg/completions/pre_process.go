@@ -1,11 +1,11 @@
 package completions
 
 import (
-	"code-completions/pkg/model"
+	"code-completion/pkg/model"
 	"strings"
 )
 
-// preparePrompt 准备prompt，处理前后缀长度并拼接
+// 准备prompt，处理前后缀长度并拼接
 func (h *CompletionHandler) preparePrompt(modelInfo *model.OpenAIModel, prefix, suffix, codeContext string) (*PromptResult, error) {
 	// 处理前缀和可选的代码上下文
 	newPrefix, newCodeContext := h.handlePrompt(prefix, true, codeContext, h.model.Config.MaxPrefixContext)
@@ -26,7 +26,7 @@ func (h *CompletionHandler) preparePrompt(modelInfo *model.OpenAIModel, prefix, 
 	}, nil
 }
 
-// handlePrompt 处理prompt截断逻辑
+// 处理prompt截断逻辑
 func (h *CompletionHandler) handlePrompt(prompt string, isPrefix bool, optionalPrompt string, minPromptToken int) (string, string) {
 	if h.model.Tokenizer == nil {
 		return prompt, optionalPrompt
@@ -98,7 +98,7 @@ func (h *CompletionHandler) handlePrompt(prompt string, isPrefix bool, optionalP
 	return prompt, optionalPrompt
 }
 
-// ensureCompleteLines 确保切割处为完整行
+// 确保切割处为完整行
 func (h *CompletionHandler) ensureCompleteLines(prompt string, isPrefix bool) string {
 	lines := strings.SplitAfter(prompt, "\n")
 	if len(lines) > 0 {
@@ -118,20 +118,20 @@ func (h *CompletionHandler) ensureCompleteLines(prompt string, isPrefix bool) st
 	return prompt
 }
 
-// judgeSingleCompletion 判断是否为单行补全
-func (h *CompletionHandler) judgeSingleCompletion(cursorLinePrefix, cursorLineSuffix, language string) bool {
+// 判断是否为单行补全
+func (h *CompletionHandler) judgeSingleCompletion(linePrefix, lineSuffix, language string) bool {
 	// 简化的单行补全判断逻辑
 	// 可以根据实际需求扩展，参考Python代码中的CompletionLineHandler逻辑
 
 	// 如果光标前缀不为空且光标后缀为空，可能是单行补全
-	if cursorLinePrefix != "" && cursorLineSuffix == "" {
+	if linePrefix != "" && lineSuffix == "" {
 		return true
 	}
 
 	// 如果光标前缀以特定字符结尾，可能是单行补全
-	if strings.HasSuffix(cursorLinePrefix, ".") ||
-		strings.HasSuffix(cursorLinePrefix, " ") ||
-		strings.HasSuffix(cursorLinePrefix, "\t") {
+	if strings.HasSuffix(linePrefix, ".") ||
+		strings.HasSuffix(linePrefix, " ") ||
+		strings.HasSuffix(linePrefix, "\t") {
 		return true
 	}
 
@@ -139,7 +139,7 @@ func (h *CompletionHandler) judgeSingleCompletion(cursorLinePrefix, cursorLineSu
 	switch strings.ToLower(language) {
 	case "python", "javascript", "typescript", "java", "c", "cpp":
 		// 对于这些语言，如果光标在行首，可能是单行补全
-		if strings.TrimSpace(cursorLinePrefix) == "" {
+		if strings.TrimSpace(linePrefix) == "" {
 			return true
 		}
 	}

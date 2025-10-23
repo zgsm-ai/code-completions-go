@@ -1,6 +1,7 @@
 package server
 
 import (
+	"code-completion/pkg/logger"
 	"context"
 	"net/http"
 	"os"
@@ -19,13 +20,13 @@ type Server struct {
 }
 
 // NewServer 创建新的服务器实例
-func NewServer(addr string, router *gin.Engine, logger *zap.Logger) *Server {
+func NewServer(addr string, router *gin.Engine) *Server {
 	return &Server{
 		httpServer: &http.Server{
 			Addr:    addr,
 			Handler: router,
 		},
-		logger: logger,
+		logger: logger.Logger,
 	}
 }
 

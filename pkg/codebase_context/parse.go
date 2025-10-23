@@ -27,7 +27,7 @@ type ParsedRelationResult struct {
 }
 
 // parseSemantic 解析语义检索结果
-func parseSemantic(data []*ResponseData) [][]string {
+func parseSemantic(data []*ResponseData) []ParsedSemanticResult {
 	if len(data) == 0 {
 		return nil
 	}
@@ -69,17 +69,17 @@ func parseSemantic(data []*ResponseData) [][]string {
 		return result[i].Score > result[j].Score
 	})
 
-	// 转换为字符串数组格式
-	var finalResult [][]string
-	for _, item := range result {
-		finalResult = append(finalResult, []string{item.FilePath, item.Content})
-	}
+	// // 转换为字符串数组格式
+	// var finalResult [][]string
+	// for _, item := range result {
+	// 	finalResult = append(finalResult, []string{item.FilePath, item.Content})
+	// }
 
-	return finalResult
+	return result
 }
 
 // parseDefinition 解析定义检索结果
-func parseDefinition(data []*ResponseData) [][]string {
+func parseDefinition(data []*ResponseData) []ParsedDefinitionResult {
 	if len(data) == 0 {
 		return nil
 	}
@@ -131,17 +131,17 @@ func parseDefinition(data []*ResponseData) [][]string {
 		}
 	}
 
-	// 转换为字符串数组格式
-	var finalResult [][]string
-	for _, item := range result {
-		finalResult = append(finalResult, []string{item.Name, item.FilePath, item.Content})
-	}
+	// // 转换为字符串数组格式
+	// var finalResult [][]string
+	// for _, item := range result {
+	// 	finalResult = append(finalResult, []string{item.Name, item.FilePath, item.Content})
+	// }
 
-	return finalResult
+	return result
 }
 
 // parseRelation 解析关系检索结果
-func parseRelation(data []*ResponseData) [][]string {
+func parseRelation(data []*ResponseData) []ParsedRelationResult {
 	if len(data) == 0 {
 		return nil
 	}
@@ -176,13 +176,13 @@ func parseRelation(data []*ResponseData) [][]string {
 		return result[i].Score > result[j].Score
 	})
 
-	// 转换为字符串数组格式
-	var finalResult [][]string
-	for _, item := range result {
-		finalResult = append(finalResult, []string{item.FilePath, item.Content})
-	}
+	// // 转换为字符串数组格式
+	// var finalResult [][]string
+	// for _, item := range result {
+	// 	finalResult = append(finalResult, []string{item.FilePath, item.Content})
+	// }
 
-	return finalResult
+	return result
 }
 
 // 辅助函数

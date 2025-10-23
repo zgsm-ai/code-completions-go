@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"time"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -12,6 +14,11 @@ func init() {
 	// 使用 NewProductionConfig 并可选调整日志级别
 	config := zap.NewProductionConfig()
 	config.Level = zap.NewAtomicLevelAt(zapcore.InfoLevel) // 设置日志级别为 Info
+
+	// 配置时间戳格式为本地时区
+	config.EncoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+		enc.AppendString(t.Local().Format("2006-01-02 15:04:05.000"))
+	}
 
 	// 注意：禁止将日志输出到文件
 	// config.OutputPaths = []string{"./app.log"}
@@ -26,9 +33,37 @@ func init() {
 	zap.ReplaceGlobals(Logger)
 }
 
-// InitLogger 初始化全局 logger（已废弃，logger 在包 init 时自动初始化）
-func InitLogger() {
-	// logger 已经在 init 函数中自动初始化，此函数保留仅为兼容性
+func SetLevel(level string) {
+	levelValue, err := zapcore.ParseLevel(level)
+	if err != nil {
+		Logger.Warn("Invalid log level, using default level (info)")
+		return
+	}
+	Logger.Core().Enabled(levelValue)
+}
+
+func SetMode(mode string) {
+	var l *zap.Logger
+	var err error
+	if mode == "debug" {
+		// 开发模式也使用本地时区
+		config := zap.NewDevelopmentConfig()
+		config.EncoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+			enc.AppendString(t.Local().Format("2006-01-02 15:04:05.000"))
+		}
+		l, err = config.Build()
+	} else {
+		// 生产模式也使用本地时区
+		config := zap.NewProductionConfig()
+		config.EncoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+			enc.AppendString(t.Local().Format("2006-01-02 15:04:05.000"))
+		}
+		l, err = config.Build()
+	}
+	if err != nil {
+		panic(err)
+	}
+	zap.ReplaceGlobals(l)
 }
 
 // Sync 刷新所有日志到输出
@@ -72,5 +107,3 @@ func Panic(msg string, fields ...zap.Field) {
 func With(fields ...zap.Field) *zap.Logger {
 	return Logger.With(fields...)
 }
-
-// ExampleUsage 示例使用函数

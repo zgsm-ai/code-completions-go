@@ -3,6 +3,7 @@ package codebase_context
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -29,95 +30,82 @@ type SearchResult struct {
 	RelationResults   []*ResponseData
 }
 
-// RequestContext 请求上下文信息
-func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePath, filePath string,
-	codeSnippets []string, queries []string, headers map[string]string) (*SearchResult, error) {
+func (c *ContextClient) searchDefinitionAsync(ctx context.Context, clientID, codebasePath, filePath, codeSnippet string,
+	headers http.Header, wg *sync.WaitGroup, results []*ResponseData, idx int) {
+	defer wg.Done()
 
+	data, err := c.searchDefinition(ctx, clientID, codebasePath, filePath, codeSnippet, headers)
+	if err != nil {
+		results[idx] = data
+	}
+}
+
+func (c *ContextClient) searchRelationAsync(ctx context.Context, clientID, codebasePath, filePath, codeSnippet string,
+	headers http.Header, wg *sync.WaitGroup, results []*ResponseData, idx int) {
+	defer wg.Done()
+
+	data, err := c.searchRelation(ctx, clientID, codebasePath, filePath, codeSnippet, headers)
+	if err != nil {
+		results[idx] = data
+	}
+}
+
+func (c *ContextClient) searchSemanticAsync(ctx context.Context, clientID, codebasePath, query string, headers http.Header,
+	wg *sync.WaitGroup, results []*ResponseData, idx int) {
+	defer wg.Done()
+
+	data, err := c.searchSemantic(ctx, clientID, codebasePath, query, headers)
+	if err != nil {
+		results[idx] = data
+	}
+}
+
+// 请求上下文信息
+func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePath, filePath string,
+	codeSnippets []string, queries []string, headers http.Header) *SearchResult {
 	if clientID == "" || codebasePath == "" || filePath == "" {
-		return &SearchResult{}, nil
+		return &SearchResult{}
 	}
 
 	// 创建上下文，设置超时
-	ctx, cancel := context.WithTimeout(ctx, config.ContextCostTime)
+	ctx, cancel := context.WithTimeout(ctx, contextConfig.TotalTimeout)
 	defer cancel()
 
 	var wg sync.WaitGroup
-	var def_mu sync.Mutex
-	var sen_mu sync.Mutex
-
 	// 初始化结果数组
 	definitionResults := make([]*ResponseData, len(codeSnippets))
+	relationResults := make([]*ResponseData, len(codeSnippets))
 	semanticResults := make([]*ResponseData, len(queries))
 
 	// 定义检索
-	if len(codeSnippets) > 0 && config.EnableDefinitionSearch {
+	if len(codeSnippets) > 0 && !contextConfig.DisableDefinitionSearch {
 		for i, codeSnippet := range codeSnippets {
-			if codeSnippet != "" {
-				wg.Add(1)
-				go func(snippet string, idx int) {
-					defer wg.Done()
-
-					// 检查上下文是否已取消
-					select {
-					case <-ctx.Done():
-						return
-					default:
-					}
-
-					data, err := c.apiClient.SearchDefinition(ctx, clientID, codebasePath, filePath, snippet, nil, nil, headers)
-
-					def_mu.Lock()
-					if err != nil {
-						zap.L().Warn("Definition search request failed", zap.Error(err))
-					} else if data != nil {
-						// 保证结束后,一定不会有数据写入
-						select {
-						case <-ctx.Done():
-							def_mu.Unlock()
-							return
-						default:
-							definitionResults[idx] = data
-						}
-					}
-					def_mu.Unlock()
-				}(codeSnippet, i)
+			if codeSnippet == "" {
+				continue
 			}
+			wg.Add(1)
+			go c.searchDefinitionAsync(ctx, clientID, codebasePath, filePath, codeSnippet, headers, &wg, definitionResults, i)
+		}
+	}
+	// 调用链检索
+	if len(codeSnippets) > 0 && !contextConfig.DisableRelationSearch {
+		for i, codeSnippet := range codeSnippets {
+			if codeSnippet == "" {
+				continue
+			}
+			wg.Add(1)
+			go c.searchRelationAsync(ctx, clientID, codebasePath, filePath, codeSnippet, headers, &wg, relationResults, i)
 		}
 	}
 
 	// 语义检索
-	if len(queries) > 0 && config.EnableSemanticSearch {
+	if len(queries) > 0 && !contextConfig.DisableSemanticSearch {
 		for i, query := range queries {
-			if query != "" {
-				wg.Add(1)
-				go func(q string, idx int) {
-					defer wg.Done()
-
-					// 检查上下文是否已取消
-					select {
-					case <-ctx.Done():
-						return
-					default:
-					}
-
-					data, err := c.apiClient.SearchSemantic(ctx, clientID, codebasePath, q, headers)
-
-					sen_mu.Lock()
-					if err != nil {
-						zap.L().Warn("Semantic search request failed", zap.Error(err))
-					} else if data != nil {
-						select {
-						case <-ctx.Done():
-							sen_mu.Unlock()
-							return
-						default:
-							semanticResults[idx] = data
-						}
-
-					}
-					sen_mu.Unlock()
-				}(query, i)
+			if query == "" {
+				continue
 			}
+			wg.Add(1)
+			go c.searchSemanticAsync(ctx, clientID, codebasePath, query, headers, &wg, semanticResults, i)
 		}
 	}
 
@@ -130,22 +118,20 @@ func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePa
 
 	// 等待完成或上下文取消
 	select {
-	case <-done:
-		// 所有请求完成
-	case <-ctx.Done():
-		// 上下文取消，直接返回已收集的结果
-		zap.L().Warn("Context timeout, returning partial results")
+	case <-done: // 所有请求完成
+	case <-ctx.Done(): // 上下文取消，直接返回已收集的结果
+		zap.L().Warn("Context timeout, returning partial results", zap.Error(ctx.Err()))
 	}
 
 	return &SearchResult{
 		DefinitionResults: definitionResults,
 		SemanticResults:   semanticResults,
-		RelationResults:   nil,
-	}, nil
+		RelationResults:   relationResults,
+	}
 }
 
-// GetContext 获取上下文信息
-func (c *ContextClient) GetContext(ctx context.Context, clientID, projectPath, filePath, prefix, suffix, importContent string, headers map[string]string) (string, error) {
+// 获取上下文信息
+func (c *ContextClient) GetContext(ctx context.Context, clientID, projectPath, filePath, prefix, suffix, importContent string, headers http.Header) (string, error) {
 	if clientID == "" || projectPath == "" || filePath == "" || (prefix == "" && suffix == "") {
 		return "", nil
 	}
@@ -166,13 +152,8 @@ func (c *ContextClient) GetContext(ctx context.Context, clientID, projectPath, f
 		fmt.Sprintf("%s%s%s", importContent, prefix, suffix),
 	}
 
-	searchResult, err := c.RequestContext(ctx, clientID, projectPath, fullFilePath,
+	searchResult := c.RequestContext(ctx, clientID, projectPath, fullFilePath,
 		definitionCodeSnaps, []string{semanticSearchContent}, headers)
-
-	if err != nil {
-		zap.L().Error("Failed to request context", zap.Error(err))
-		return "", err
-	}
 
 	// 解析语义检索结果
 	semanticCodes := parseSemantic(searchResult.SemanticResults)
@@ -181,36 +162,76 @@ func (c *ContextClient) GetContext(ctx context.Context, clientID, projectPath, f
 	defCodes := parseDefinition(searchResult.DefinitionResults)
 
 	// 解析关系检索结果
-	// relationCodes := parseRelation(searchResult.RelationResults)
+	relationCodes := parseRelation(searchResult.RelationResults)
 
 	var allCodes []string
 
 	// 合并定义检索结果
 	for _, item := range defCodes {
-		if len(item) > 1 {
-			allCodes = append(allCodes, item[1:]...)
-		}
+		allCodes = append(allCodes, item.FilePath, item.Content)
+		// if len(item) > 1 {
+		// 	allCodes = append(allCodes, item[1:]...)
+		// }
 	}
 
 	// 合并语义检索结果
 	for _, item := range semanticCodes {
-		if len(item) >= 2 {
-			allCodes = append(allCodes, item[:2]...)
-		}
+		allCodes = append(allCodes, item.FilePath, item.Content)
+		// if len(item) >= 2 {
+		// 	allCodes = append(allCodes, item[:2]...)
+		// }
 	}
 
-	// // 合并关系检索结果
-	// if relationCodes != nil {
-	// 	for _, item := range relationCodes {
-	// 		if len(item) > 1 {
-	// 			allCodes = append(allCodes, item[1:]...)
-	// 		}
-	// 	}
-	// }
+	// 合并关系检索结果
+	for _, item := range relationCodes {
+		allCodes = append(allCodes, item.FilePath, item.Content)
+		// if len(item) > 1 {
+		// 	allCodes = append(allCodes, item[1:]...)
+		// }
+	}
 
 	// 合并所有结果
 	semanticResult := strings.Join(allCodes, "\n")
 
 	// 添加注释
 	return getComment(fullFilePath, semanticResult), nil
+}
+
+// 搜索代码定义
+func (c *ContextClient) searchDefinition(ctx context.Context, clientID, codebasePath, filePath, codeSnippet string, headers http.Header) (*ResponseData, error) {
+	params := RequestParam{
+		ClientID:     clientID,
+		CodebasePath: codebasePath,
+		FilePath:     filePath,
+		CodeSnippet:  codeSnippet,
+	}
+
+	return c.apiClient.DoRequest(ctx, contextConfig.CodebaseDefinitionURL, params, headers, "GET")
+}
+
+// 语义搜索
+func (c *ContextClient) searchSemantic(ctx context.Context, clientID, codebasePath, query string, headers http.Header) (*ResponseData, error) {
+	params := RequestParam{
+		ClientID:       clientID,
+		CodebasePath:   codebasePath,
+		Query:          query,
+		TopK:           contextConfig.SemanticTopK,
+		ScoreThreshold: contextConfig.SemanticScoreThreshold,
+	}
+
+	return c.apiClient.DoRequest(ctx, contextConfig.CodebaseSemanticURL, params, headers, "POST")
+}
+
+// 关系检索
+func (c *ContextClient) searchRelation(ctx context.Context, clientID, codebasePath, filePath, codeSnippet string, headers http.Header) (*ResponseData, error) {
+	params := RequestParam{
+		ClientID:       clientID,
+		CodebasePath:   codebasePath,
+		FilePath:       filePath,
+		CodeSnippet:    codeSnippet,
+		MaxLayer:       contextConfig.RelationLayer,
+		IncludeContent: contextConfig.RelationIncludeContent,
+	}
+
+	return c.apiClient.DoRequest(ctx, contextConfig.CodebaseRelationURL, params, headers, "GET")
 }

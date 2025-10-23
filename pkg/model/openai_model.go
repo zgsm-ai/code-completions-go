@@ -2,7 +2,8 @@ package model
 
 import (
 	"bytes"
-	"code-completions/pkg/tokenizers"
+	"code-completion/pkg/config"
+	"code-completion/pkg/tokenizers"
 	"context"
 	"encoding/json"
 	"io"
@@ -12,42 +13,27 @@ import (
 	"go.uber.org/zap"
 )
 
-type ModelConfig struct {
-	CompletionsUrl   string   `json:"completionsUl" yaml:"completionsUrl"`      // 补全地址
-	ModelName        string   `json:"modelName" yaml:"modelName"`               // 模型名称
-	Authorization    string   `json:"authorization" yaml:"authorization"`       // 认证信息
-	Timeout          int      `json:"timeout" yaml:"timeout"`                   // 超时时间ms
-	MaxPrefixContext int      `json:"maxPrefixContext" yaml:"maxPrefixContext"` // 最大模型上下文长度:前缀
-	MaxSuffixContext int      `json:"maxSuffixContext" yaml:"maxSuffixContext"` // 最大模型上下文长度:后缀
-	MaxOuputToken    int      `json:"maxOutputToken" yaml:"maxOutputToken"`     // 最大输出token数
-	FimPrefix        string   `json:"fimPrefix" yaml:"fimPrefix"`               // 前缀
-	FimMiddle        string   `json:"fimMiddle" yaml:"fimMiddle"`               // 中缀
-	FimSuffix        string   `json:"fimSuffix" yaml:"fimSuffix"`               // 后缀
-	FimStop          []string `json:"fimStop" yaml:"fimStop"`                   // 结束符
-}
-
 type CompletionStatus string
 
 const (
 	CompletionSucess       CompletionStatus = "sucess"
-	CompletionModel        CompletionStatus = "modelError"
-	CompletionReqError     CompletionStatus = "reqError"
+	CompletionModelError   CompletionStatus = "modelError" //模型响应错误
+	CompletionReqError     CompletionStatus = "reqError"   //请求存在错误
 	CompletionEmpty        CompletionStatus = "empty"
 	CompletionProcessEmpty CompletionStatus = "processEmpty"
-	CompletionServerError  CompletionStatus = "serverError"
-	CompletionReject       CompletionStatus = "reject"
+	CompletionServerError  CompletionStatus = "serverError" //服务端错误
+	CompletionReject       CompletionStatus = "reject"      //根据规则拒绝补全
 	CompletionTimeout      CompletionStatus = "timeout"
 )
 
 type OpenAIModel struct {
-	Config    ModelConfig
+	Config    config.ModelConfig
 	Tokenizer *tokenizers.Tokenizer
 }
 
 func (m *OpenAIModel) Completions(ctx context.Context, data map[string]interface{}, requestId string) (map[string]interface{}, CompletionStatus, *time.Time, *time.Time) {
-
 	if data == nil {
-		zap.L().Error("req body is null", zap.String("requestId", requestId))
+		zap.L().Warn("req body is null", zap.String("requestId", requestId))
 		return nil, CompletionReqError, nil, nil
 	}
 
@@ -59,14 +45,14 @@ func (m *OpenAIModel) Completions(ctx context.Context, data map[string]interface
 	// 将data转换为JSON
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		zap.L().Error("json Marshal Error", zap.String("requestId", requestId), zap.String("error", err.Error()))
+		zap.L().Warn("json Marshal Error", zap.String("requestId", requestId), zap.Error(err))
 		return nil, CompletionServerError, nil, nil
 	}
 
 	// 创建HTTP请求
 	req, err := http.NewRequestWithContext(ctx, "POST", m.Config.CompletionsUrl, bytes.NewBuffer(jsonData))
 	if err != nil {
-		zap.L().Error("create request error", zap.String("requestId", requestId), zap.String("error", err.Error()))
+		zap.L().Warn("create request error", zap.String("requestId", requestId), zap.Error(err))
 		return nil, CompletionReqError, nil, nil
 	}
 
@@ -76,36 +62,40 @@ func (m *OpenAIModel) Completions(ctx context.Context, data map[string]interface
 
 	// 发送请求
 	client := &http.Client{
-		Timeout: time.Duration(m.Config.Timeout) * time.Millisecond,
+		Timeout: m.Config.Timeout,
 	}
 	modelStartTime := time.Now()
 	resp, err := client.Do(req)
 	modelEndTime := time.Now()
 	if err != nil {
-		zap.L().Error("Do Request Error", zap.String("requestId", requestId), zap.String("error", err.Error()))
-		return nil, CompletionReqError, &modelStartTime, &modelEndTime
-	}
-	defer resp.Body.Close()
-
-	// 检查HTTP状态码
-	if resp.StatusCode != http.StatusOK {
-		zap.L().Error("resp Status error", zap.Int("http code", resp.StatusCode), zap.String("requestId", requestId))
-		return nil, CompletionReqError, &modelStartTime, &modelEndTime
-	}
-
-	// 读取响应体
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		zap.L().Error("resp Status error", zap.String("requestId", requestId), zap.String("error", err.Error()))
-		return nil, CompletionReqError, &modelStartTime, &modelEndTime
-	}
-
-	// 解析JSON响应
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		zap.L().Error("json unmarshal error", zap.String("requestId", requestId), zap.String("error", err.Error()))
+		zap.L().Warn("Request model error", zap.String("requestId", requestId),
+			zap.Duration("latency", modelEndTime.Sub(modelStartTime)),
+			zap.Error(err))
 		return nil, CompletionServerError, &modelStartTime, &modelEndTime
 	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		zap.L().Warn("Read resp.body error", zap.String("requestId", requestId),
+			zap.Duration("latency", modelEndTime.Sub(modelStartTime)), zap.Error(err))
+		return nil, CompletionServerError, &modelStartTime, &modelEndTime
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		zap.L().Warn("Response Status error", zap.Int("status", resp.StatusCode),
+			zap.String("requestId", requestId),
+			zap.Duration("latency", modelEndTime.Sub(modelStartTime)),
+			zap.String("respBody", string(body)))
+		return nil, CompletionModelError, &modelStartTime, &modelEndTime
+	}
 
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		zap.L().Warn("json unmarshal error", zap.String("requestId", requestId),
+			zap.Duration("latency", modelEndTime.Sub(modelStartTime)), zap.Error(err))
+		return nil, CompletionServerError, &modelStartTime, &modelEndTime
+	}
+	zap.L().Info("Request model succeeded", zap.String("requestId", requestId),
+		zap.Duration("latency", modelEndTime.Sub(modelStartTime)),
+		zap.String("respBody", string(body)))
 	return result, CompletionSucess, &modelStartTime, &modelEndTime
 }

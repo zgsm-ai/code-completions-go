@@ -6,31 +6,19 @@ import (
 	"strings"
 	"time"
 
-	"code-completions/pkg/codebase_context"
-	"code-completions/pkg/metrics"
-	"code-completions/pkg/model"
-
-	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
+	"code-completion/pkg/codebase_context"
+	"code-completion/pkg/config"
+	"code-completion/pkg/metrics"
+	"code-completion/pkg/model"
 )
 
-// CalculateHideScore 计算隐藏分数配置
-type CalculateHideScore struct {
-	IsWhitespaceAfterCursor bool   `json:"is_whitespace_after_cursor"`
-	Prefix                  string `json:"prefix"`
-	DocumentLength          int    `json:"document_length"`
-	PromptEndPos            int    `json:"prompt_end_pos"`
-	PreviousLabel           int    `json:"previous_label"`
-	PreviousLabelTimestamp  int64  `json:"previous_label_timestamp"`
-}
-
-// CompletionHandler 补全处理器
+// 补全处理器
 type CompletionHandler struct {
 	contextClient *codebase_context.ContextClient
 	model         *model.OpenAIModel // 模型
 }
 
-// PromptResult prompt处理结果
+// prompt处理结果
 type PromptResult struct {
 	Prompt       string `json:"prompt"`
 	PromptTokens int    `json:"prompt_tokens"`
@@ -51,24 +39,23 @@ func NewCompletionHandler() *CompletionHandler {
 }
 
 // HandleCompletion 处理补全请求
-func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *CompletionRequest, headers map[string]string) (*CompletionResponse, error) {
+func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *CompletionRequest, headers http.Header) (*CompletionResponse, error) {
 	requestTime := time.Now()
 	startTime := time.Now()
 
 	// 0. 补全拒绝规则链处理
 	rejectResult := DefaultCompletionRejectRuleChain.Handle(req)
 	if rejectResult != nil {
-		// 记录拒绝指标
 		totalDuration := float64(time.Since(startTime).Milliseconds())
 		metrics.RecordCompletionTotalDuration(req.Model, metrics.StatusReject, totalDuration)
 		metrics.IncrementCompletionRequests(req.Model, metrics.StatusReject)
 
-		return ErrorResponse(req.CompletionID, req.Model, model.CompletionReject, requestTime, "", 0,
+		return ErrorResponse(req, model.CompletionReject, requestTime, "", 0,
 			nil, nil, 0, []CompletionChoice{}), nil
 	}
 
 	// 1. 解析请求参数
-	prefix, suffix, cursorLinePrefix, cursorLineSuffix, codeContext := h.parsePrompt(req)
+	prefix, suffix, linePrefix, lineSuffix, codeContext := h.parsePrompt(req)
 
 	// 2. 获取上下文信息
 	if codeContext == "" {
@@ -86,7 +73,7 @@ func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *Completio
 	}
 
 	// 4. 判断是否为单行补全
-	isSingleCompletion := h.judgeSingleCompletion(cursorLinePrefix, cursorLineSuffix, req.LanguageID)
+	isSingleCompletion := h.judgeSingleCompletion(linePrefix, lineSuffix, req.LanguageID)
 	if isSingleCompletion {
 		if len(req.Stop) > 0 {
 			req.Stop = append(req.Stop, "\n")
@@ -110,7 +97,7 @@ func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *Completio
 		"top_p":             1,
 		"stream":            false,
 	}
-	result, completionStatus, reqStartTime, reqEndTime := h.model.Completions(ctx, completionData, "")
+	result, completionStatus, reqStartTime, reqEndTime := h.model.Completions(ctx, completionData, req.CompletionID)
 
 	// 记录模型推理耗时
 	var modelDuration float64
@@ -121,8 +108,6 @@ func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *Completio
 	}
 
 	if completionStatus != model.CompletionSucess {
-		zap.L().Error("请求模型补全错误", zap.String("Status", string(completionStatus)))
-
 		// 记录模型错误指标
 		status := metrics.Status(completionStatus)
 		totalDuration := float64(time.Since(startTime).Milliseconds())
@@ -131,7 +116,7 @@ func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *Completio
 		metrics.IncrementCompletionRequests(req.Model, status)
 		metrics.RecordCompletionTokens(metrics.TokenTypeInput, req.Model, promptResult.PromptTokens)
 
-		return ErrorResponse(req.CompletionID, req.Model, completionStatus, requestTime, promptResult.Prompt, promptResult.PromptTokens,
+		return ErrorResponse(req, completionStatus, requestTime, promptResult.Prompt, promptResult.PromptTokens,
 			reqStartTime, reqEndTime, 0, []CompletionChoice{}), nil
 	}
 
@@ -148,7 +133,7 @@ func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *Completio
 					completionText = text
 				}
 			}
-			
+
 			// 提取所有choices作为ModelChoices
 			for _, choiceInterface := range choices {
 				if choice, ok := choiceInterface.(map[string]interface{}); ok {
@@ -162,21 +147,15 @@ func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *Completio
 
 	// 创建补全后置处理器，处理补全结果
 	if completionText != "" {
-		postprocessorContext := &CompletionPostprocessorContext{
+		postprocessorContext := &PostprocessorContext{
 			Language:       req.LanguageID,
 			CompletionCode: completionText,
 			Prefix:         prefix,
 			Suffix:         suffix,
 		}
 
-		factory := &CompletionPostprocessorFactory{}
-		postprocessorChain := factory.CreateDefault(req.CompletionID)
-		postprocessorChain.Process(postprocessorContext)
-
-		// 无实际补全内容，置为空
-		if !isValidContent(postprocessorContext.CompletionCode) {
-			postprocessorContext.CompletionCode = ""
-		}
+		chain := NewDefaultPostprocessorChain(req.CompletionID)
+		chain.Process(postprocessorContext)
 
 		// 去除补全内容后空格
 		completionText = strings.TrimSpace(postprocessorContext.CompletionCode)
@@ -190,12 +169,12 @@ func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *Completio
 		metrics.IncrementCompletionRequests(req.Model, metrics.StatusEmpty)
 		metrics.RecordCompletionTokens(metrics.TokenTypeInput, req.Model, promptResult.PromptTokens)
 
-		return ErrorResponse(req.CompletionID, req.Model, model.CompletionProcessEmpty, requestTime, promptResult.Prompt, promptResult.PromptTokens,
+		return ErrorResponse(req, model.CompletionProcessEmpty, requestTime, promptResult.Prompt, promptResult.PromptTokens,
 			reqStartTime, reqEndTime, 0, modelChoices), nil
 	}
 
 	// 7. 构建响应
-	response := SuccessResponse(req.CompletionID, req.Model, completionText, requestTime, promptResult.Prompt, promptResult.PromptTokens,
+	response := SuccessResponse(req, completionText, requestTime, promptResult.Prompt, promptResult.PromptTokens,
 		reqStartTime, reqEndTime, 0, modelChoices)
 
 	// 记录成功指标
@@ -210,12 +189,12 @@ func (h *CompletionHandler) HandleCompletion(ctx context.Context, req *Completio
 }
 
 // parsePrompt 解析提示词
-func (h *CompletionHandler) parsePrompt(req *CompletionRequest) (prefix, suffix, cursorLinePrefix, cursorLineSuffix, codeContext string) {
+func (h *CompletionHandler) parsePrompt(req *CompletionRequest) (prefix, suffix, linePrefix, lineSuffix, codeContext string) {
 	if req.PromptOptions != nil {
 		prefix = req.PromptOptions.Prefix
 		suffix = req.PromptOptions.Suffix
-		cursorLinePrefix = req.PromptOptions.CursorLinePrefix
-		cursorLineSuffix = req.PromptOptions.CursorLineSuffix
+		linePrefix = req.PromptOptions.CursorLinePrefix
+		lineSuffix = req.PromptOptions.CursorLineSuffix
 		codeContext = req.PromptOptions.CodeContext
 	} else {
 		// 简单的提示词解析逻辑，参考Python代码
@@ -223,30 +202,30 @@ func (h *CompletionHandler) parsePrompt(req *CompletionRequest) (prefix, suffix,
 		// 可以根据FIM_INDICATOR分割prompt来获取prefix和suffix
 	}
 
-	// 如果cursorLinePrefix为空，从prefix中提取
-	if cursorLinePrefix == "" && prefix != "" {
+	// 如果linePrefix为空，从prefix中提取
+	if linePrefix == "" && prefix != "" {
 		lines := strings.Split(prefix, "\n")
 		if len(lines) > 0 {
-			cursorLinePrefix = lines[len(lines)-1]
+			linePrefix = lines[len(lines)-1]
 		}
 	}
 
-	// 如果cursorLineSuffix为空，从suffix中提取
-	if cursorLineSuffix == "" && suffix != "" {
+	// 如果lineSuffix为空，从suffix中提取
+	if lineSuffix == "" && suffix != "" {
 		lines := strings.Split(suffix, "\n")
 		if len(lines) > 0 {
-			cursorLineSuffix = lines[0]
+			lineSuffix = lines[0]
 			if len(lines) > 1 {
-				cursorLineSuffix += "\n"
+				lineSuffix += "\n"
 			}
 		}
 	}
 
-	return prefix, suffix, cursorLinePrefix, cursorLineSuffix, codeContext
+	return prefix, suffix, linePrefix, lineSuffix, codeContext
 }
 
 // getPromptTemplate 获取prompt模板
-func (h *CompletionHandler) getPromptTemplate(prefix, suffix, codeContext string, modelConfig *model.ModelConfig) string {
+func (h *CompletionHandler) getPromptTemplate(prefix, suffix, codeContext string, modelConfig *config.ModelConfig) string {
 	return modelConfig.FimPrefix + codeContext + "\n" + prefix + modelConfig.FimSuffix + suffix + modelConfig.FimMiddle
 }
 
@@ -271,8 +250,7 @@ func (h *CompletionHandler) prepareStopWords(suffix string, req *CompletionReque
 }
 
 // getContext 获取上下文信息
-func (h *CompletionHandler) getContext(ctx context.Context, req *CompletionRequest, prefix, suffix string, headers map[string]string) (string, error) {
-	// 使用上下文客户端获取上下文信息
+func (h *CompletionHandler) getContext(ctx context.Context, req *CompletionRequest, prefix, suffix string, headers http.Header) (string, error) {
 	context, err := h.contextClient.GetContext(
 		ctx,
 		req.ClientID,
@@ -287,32 +265,4 @@ func (h *CompletionHandler) getContext(ctx context.Context, req *CompletionReque
 		return "", err
 	}
 	return context, nil
-}
-
-// GinHandler Gin框架的处理器
-func (h *CompletionHandler) GinHandler(c *gin.Context) {
-	// 解析请求
-	var req CompletionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// 获取请求头
-	headers := make(map[string]string)
-	for key, values := range c.Request.Header {
-		if len(values) > 0 {
-			headers[key] = values[0]
-		}
-	}
-
-	// 处理补全请求
-	response, err := h.HandleCompletion(c.Request.Context(), &req, headers)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// 返回响应
-	c.JSON(http.StatusOK, response)
 }

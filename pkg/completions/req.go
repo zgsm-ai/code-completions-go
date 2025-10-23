@@ -18,17 +18,25 @@ type CompletionRequest struct {
 	CompletionID       string                 `json:"completion_id,omitempty"`
 	BetaMode           bool                   `json:"beta_mode,omitempty"`
 	CalculateHideScore *CalculateHideScore    `json:"calculate_hide_score,omitempty"`
-	CodePath           string                 `json:"code_path,omitempty"`
-	UserID             string                 `json:"user_id,omitempty"`
-	Repo               string                 `json:"repo,omitempty"`
-	GitPath            string                 `json:"git_path,omitempty"`
+	// CodePath           string                 `json:"code_path,omitempty"`
+	// UserID             string                 `json:"user_id,omitempty"`
 }
 
-// PromptOptions 提示词选项
+// 提示词选项
 type PromptOptions struct {
 	Prefix           string `json:"prefix,omitempty"`
 	Suffix           string `json:"suffix,omitempty"`
 	CursorLinePrefix string `json:"cursor_line_prefix,omitempty"`
 	CursorLineSuffix string `json:"cursor_line_suffix,omitempty"`
 	CodeContext      string `json:"code_context,omitempty"`
+}
+
+// 计算隐藏分数配置
+type CalculateHideScore struct {
+	IsWhitespaceAfterCursor bool   `json:"is_whitespace_after_cursor"`
+	Prefix                  string `json:"prefix"`
+	DocumentLength          int    `json:"document_length"`
+	PromptEndPos            int    `json:"prompt_end_pos"`
+	PreviousLabel           int    `json:"previous_label"`
+	PreviousLabelTimestamp  int64  `json:"previous_label_timestamp"`
 }

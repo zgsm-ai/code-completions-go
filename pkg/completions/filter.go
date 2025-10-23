@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"code-completions/pkg/config"
-	"code-completions/pkg/logger"
+	"code-completion/pkg/config"
+	"code-completion/pkg/logger"
 
 	"go.uber.org/zap"
 )
@@ -16,45 +16,30 @@ import (
 type RejectCodeEnum string
 
 const (
+	Accepted          RejectCodeEnum = "ACCEPTED"
 	LowHiddenScore    RejectCodeEnum = "LOW_HIDDEN_SCORE"
 	AuthFail          RejectCodeEnum = "AUTH_FAIL"
 	FeatureNotSupport RejectCodeEnum = "FEATURE_NOT_SUPPORT"
 )
 
-// AbstractCompletionRejectHandler 抽象补全拒绝处理器接口
-type AbstractCompletionRejectHandler interface {
-	GetEnvSuffixName() string
-	Judge(data *CompletionRequest) *RejectCodeEnum
+// 补全过滤器接口
+type CompletionFilter interface {
+	Judge(data *CompletionRequest) RejectCodeEnum
 }
 
-// BaseRejectHandler 基础拒绝处理器，提供通用的启用检查逻辑
-type BaseRejectHandler struct{}
-
-func (b *BaseRejectHandler) Enabled(suffixName string) bool {
-	switch strings.ToUpper(suffixName) {
-	case "LOW_HIDDEN_SCORE":
-		return !config.Config.CompletionsConfig.DisalbeScoreReject
-	case "LANGUAGE_FEATURE":
-		return !config.Config.CompletionsConfig.DisableLanguageFeatureReject
-	default:
-		return true
-	}
-}
-
-// LanguageFeatureRejectHandler 语言特性拒绝处理器
-type LanguageFeatureRejectHandler struct {
-	BaseRejectHandler
+// 语言特性过滤器
+type LanguageFeatureFilter struct {
 	codeFilters *CodeFilters
 }
 
-// NewLanguageFeatureRejectHandler 创建语言特性拒绝处理器
-func NewLanguageFeatureRejectHandler() *LanguageFeatureRejectHandler {
+// 创建语言特性过滤器
+func NewLanguageFeatureFilter() *LanguageFeatureFilter {
 	thresholdScore := config.Config.CompletionsConfig.ThresholdScore
 	if thresholdScore == 0 {
 		thresholdScore = 0.3
 	}
 
-	return &LanguageFeatureRejectHandler{
+	return &LanguageFeatureFilter{
 		codeFilters: NewCodeFilters(
 			thresholdScore,
 			config.Config.CompletionsConfig.StrPattern,
@@ -63,62 +48,54 @@ func NewLanguageFeatureRejectHandler() *LanguageFeatureRejectHandler {
 	}
 }
 
-func (h *LanguageFeatureRejectHandler) GetEnvSuffixName() string {
-	return "LANGUAGE_FEATURE"
-}
-
-
-func (h *LanguageFeatureRejectHandler) Judge(data *CompletionRequest) *RejectCodeEnum {
+func (h *LanguageFeatureFilter) Judge(data *CompletionRequest) RejectCodeEnum {
 	// 跳过手动触发模式
-	if data.TriggerMode == "MANUAL" {
-		return nil
+	if strings.ToUpper(data.TriggerMode) == "MANUAL" {
+		return Accepted
 	}
 
 	// 检查是否需要代码补全
 	if h.codeFilters.NeedCode(data) {
-		return nil
+		return Accepted
 	}
 
-	rejectCode := FeatureNotSupport
-	return &rejectCode
+	return FeatureNotSupport
 }
 
-// LowHiddenScoreRejectHandler 低隐藏分数拒绝处理器
-type LowHiddenScoreRejectHandler struct {
-	BaseRejectHandler
+// 低隐藏分数过滤器
+type HiddenScoreFilter struct {
 	hideScoreConfig *HideScoreConfig
 }
 
-// NewLowHiddenScoreRejectHandler 创建低隐藏分数拒绝处理器
-func NewLowHiddenScoreRejectHandler() *LowHiddenScoreRejectHandler {
+// 创建隐藏分数过滤器
+func NewHiddenScoreFilter() *HiddenScoreFilter {
 	thresholdScore := config.Config.CompletionsConfig.ThresholdScore
 	if thresholdScore == 0 {
 		thresholdScore = 0.3
 	}
 
-	return &LowHiddenScoreRejectHandler{
+	return &HiddenScoreFilter{
 		hideScoreConfig: NewHideScoreConfig("./config/hide_score.yml", thresholdScore),
 	}
 }
 
-func (h *LowHiddenScoreRejectHandler) GetEnvSuffixName() string {
-	return "LOW_HIDDEN_SCORE"
-}
-
-
-func (h *LowHiddenScoreRejectHandler) Judge(data *CompletionRequest) *RejectCodeEnum {
+func (h *HiddenScoreFilter) Judge(data *CompletionRequest) RejectCodeEnum {
 	// 跳过手动触发和继续补全模式
-	if data.TriggerMode == "MANUAL" || data.TriggerMode == "CONTINUE" {
-		return nil
+	mode := strings.ToUpper(data.TriggerMode)
+	if mode == "MANUAL" || mode == "CONTINUE" {
+		return Accepted
 	}
 
 	// 计算隐藏分数
 	if data.CalculateHideScore == nil {
-		return nil
+		return Accepted
 	}
 
 	score := 0.0
 	if data.CalculateHideScore.DocumentLength != 0 {
+		if data.PromptOptions != nil {
+			data.CalculateHideScore.Prefix = data.PromptOptions.Prefix
+		}
 		score = h.hideScoreConfig.CalculateHideScore(data.CalculateHideScore, data.LanguageID)
 	}
 
@@ -131,34 +108,32 @@ func (h *LowHiddenScoreRejectHandler) Judge(data *CompletionRequest) *RejectCode
 	// 通过配置阈值来过滤隐藏分低的补全
 	if score < h.hideScoreConfig.ThresholdScore {
 		// 添加日志记录（问题1修复）
-		logger.Info("低隐藏分数拒绝补全",
+		logger.Debug("低隐藏分数拒绝补全",
 			zap.Float64("score", score),
 			zap.Float64("threshold", h.hideScoreConfig.ThresholdScore),
 			zap.String("completion_id", data.CompletionID),
 			zap.String("language", data.LanguageID))
-		rejectCode := LowHiddenScore
-		return &rejectCode
+		return LowHiddenScore
 	}
 
-	return nil
+	return Accepted
 }
 
 // CompletionRejectRuleChain 补全拒绝规则链
 type CompletionRejectRuleChain struct {
-	rejectHandlers []AbstractCompletionRejectHandler
+	rejectHandlers []CompletionFilter
 }
 
 // NewCompletionRejectRuleChain 创建新的拒绝规则链
 func NewCompletionRejectRuleChain() *CompletionRejectRuleChain {
-	handlers := make([]AbstractCompletionRejectHandler, 0)
+	handlers := make([]CompletionFilter, 0)
 
-	// 添加启用的拒绝处理器
-	if !config.Config.CompletionsConfig.DisalbeScoreReject {
-		handlers = append(handlers, NewLowHiddenScoreRejectHandler())
+	if !config.Config.CompletionsConfig.DisableScore {
+		handlers = append(handlers, NewHiddenScoreFilter())
 	}
 
-	if !config.Config.CompletionsConfig.DisableLanguageFeatureReject {
-		handlers = append(handlers, NewLanguageFeatureRejectHandler())
+	if !config.Config.CompletionsConfig.DisableLanguageFeature {
+		handlers = append(handlers, NewLanguageFeatureFilter())
 	}
 
 	return &CompletionRejectRuleChain{
@@ -169,8 +144,8 @@ func NewCompletionRejectRuleChain() *CompletionRejectRuleChain {
 // Handle 处理补全请求，只要命中一个规则就拒绝补全
 func (c *CompletionRejectRuleChain) Handle(data *CompletionRequest) error {
 	for _, handler := range c.rejectHandlers {
-		if rejectCode := handler.Judge(data); rejectCode != nil {
-			return fmt.Errorf("%s", *rejectCode)
+		if rejectCode := handler.Judge(data); rejectCode != Accepted {
+			return fmt.Errorf("%s", rejectCode)
 		}
 	}
 	return nil

@@ -1,7 +1,7 @@
 package completions
 
 import (
-	"code-completions/pkg/model"
+	"code-completion/pkg/model"
 	"time"
 )
 
@@ -27,12 +27,12 @@ type CompletionChoice struct {
 	Text string `json:"text"`
 }
 
-func ErrorResponse(id string, modelName string, ErrorCode model.CompletionStatus, reqTime time.Time,
+func ErrorResponse(req *CompletionRequest, ErrorCode model.CompletionStatus, reqTime time.Time,
 	Prompt string, PromptTokens int,
 	ModelStartTime *time.Time, ModelEndTime *time.Time, ModelCostTime int, ModelChoices []CompletionChoice) *CompletionResponse {
 	return &CompletionResponse{
-		ID:             id,
-		Model:          modelName,
+		ID:             req.CompletionID,
+		Model:          req.Model,
 		Object:         "text_completion",
 		RequestTime:    reqTime, // 可以使用时间戳
 		Prompt:         Prompt,
@@ -48,22 +48,34 @@ func ErrorResponse(id string, modelName string, ErrorCode model.CompletionStatus
 	}
 }
 
-func SuccessResponse(id string, modelName string, completionText string, reqTime time.Time,
+func SuccessResponse(req *CompletionRequest, completionText string, reqTime time.Time,
 	Prompt string, PromptTokens int,
 	ModelStartTime *time.Time, ModelEndTime *time.Time, ModelCostTime int, ModelChoices []CompletionChoice) *CompletionResponse {
 	return &CompletionResponse{
-		ID:               id,
-		Model:            modelName,
+		ID:               req.CompletionID,
+		Model:            req.Model,
 		Object:           "text_completion",
 		RequestTime:      reqTime, // 可以使用时间戳
 		Prompt:           Prompt,
 		PromptTokens:     PromptTokens,
+		Choices:          []CompletionChoice{{Text: completionText}}, // 使用后置处理后的补全结果
 		ModelStartTime:   ModelStartTime,
 		ModelEndTime:     ModelEndTime,
 		ModelCostTime:    ModelCostTime,
-		Choices:          []CompletionChoice{{Text: completionText}}, // 使用后置处理后的补全结果
 		ModelChoices:     ModelChoices,
 		CompletionTokens: 0,
 		Status:           model.CompletionSucess,
+	}
+}
+
+// 取消请求
+func CancelRequest(req *CompletionRequest) *CompletionResponse {
+	// 返回一个取消的响应
+	return &CompletionResponse{
+		ID:      req.CompletionID,
+		Model:   req.Model,
+		Object:  "text_completion",
+		Choices: []CompletionChoice{{Text: ""}},
+		Status:  "canceled",
 	}
 }

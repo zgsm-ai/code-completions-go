@@ -84,7 +84,7 @@ const (
 	TokenTypeOutput TokenType = "output"
 )
 
-// RecordCompletionTotalDuration 记录请求总耗时分布
+// 记录请求总耗时分布
 func RecordCompletionTotalDuration(model string, status Status, duration float64) {
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
@@ -92,7 +92,7 @@ func RecordCompletionTotalDuration(model string, status Status, duration float64
 	completionTotalDurationSeconds.WithLabelValues(model, string(status)).Observe(duration)
 }
 
-// RecordCompletionModelDuration 记录模型推理耗时分布
+// 记录模型推理耗时分布
 func RecordCompletionModelDuration(model string, status Status, duration float64) {
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
@@ -100,7 +100,7 @@ func RecordCompletionModelDuration(model string, status Status, duration float64
 	completionModelDurationSeconds.WithLabelValues(model, string(status)).Observe(duration)
 }
 
-// RecordCompletionDuration 记录请求在不同阶段的耗时分布 (保持向后兼容)
+// 记录请求在不同阶段的耗时分布 (保持向后兼容)
 func RecordCompletionDuration(phase Phase, model string, status Status, duration float64) {
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
@@ -113,7 +113,7 @@ func RecordCompletionDuration(phase Phase, model string, status Status, duration
 	}
 }
 
-// RecordCompletionTokens 记录每次请求的输入和输出token数分布
+// 记录每次请求的输入和输出token数分布
 func RecordCompletionTokens(tokenType TokenType, model string, tokenCount int) {
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
@@ -121,7 +121,7 @@ func RecordCompletionTokens(tokenType TokenType, model string, tokenCount int) {
 	completionTokens.WithLabelValues(string(tokenType), model).Observe(float64(tokenCount))
 }
 
-// IncrementCompletionRequests 记录请求总数，用于计算QPS和错误率
+// 记录请求总数，用于计算QPS和错误率
 func IncrementCompletionRequests(model string, status Status) {
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
@@ -129,7 +129,7 @@ func IncrementCompletionRequests(model string, status Status) {
 	completionRequestsTotal.WithLabelValues(model, string(status)).Inc()
 }
 
-// GetMetricsHandler 返回Prometheus指标数据的HTTP处理器
+// 返回Prometheus指标数据的HTTP处理器
 func GetMetricsHandler() http.Handler {
 	return promhttp.Handler()
 }

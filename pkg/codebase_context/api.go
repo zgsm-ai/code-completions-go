@@ -5,8 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"time"
+	"net/url"
 
 	"go.uber.org/zap"
 )
@@ -18,23 +19,15 @@ type HTTPClient interface {
 
 // APIClient API客户端结构体
 type APIClient struct {
-	client        HTTPClient
-	definitionURL string
-	semanticURL   string
-	relationURL   string
-	timeout       time.Duration
+	client HTTPClient
 }
 
 // NewAPIClient 创建新的API客户端
 func NewAPIClient() *APIClient {
 	return &APIClient{
 		client: &http.Client{
-			Timeout: config.RequestTimeout,
+			Timeout: contextConfig.RequestTimeout,
 		},
-		definitionURL: config.CodebaseDefinitionURL,
-		semanticURL:   config.CodebaseSemanticURL,
-		relationURL:   config.CodebaseRelationURL,
-		timeout:       config.RequestTimeout,
 	}
 }
 
@@ -60,107 +53,96 @@ type ResponseData struct {
 	} `json:"data"`
 }
 
-// doRequest 发送HTTP请求
-func (c *APIClient) doRequest(ctx context.Context, url string, params interface{}, headers map[string]string, method string) (*ResponseData, error) {
-	var req *http.Request
-	var err error
-
-	// 准备请求体
-	var body []byte
-	if method == "POST" {
-		body, err = json.Marshal(params)
-		if err != nil {
-			zap.L().Error("Failed to marshal request params", zap.Error(err))
-			return nil, err
+func kvs2UrlValues(kvs map[string]interface{}) url.Values {
+	values := url.Values{}
+	for key, value := range kvs {
+		switch v := value.(type) {
+		case string:
+			values.Add(key, v)
+		case int, int8, int16, int32, int64:
+			values.Add(key, fmt.Sprintf("%d", v))
+		case float32, float64:
+			values.Add(key, fmt.Sprintf("%f", v))
+		case bool:
+			values.Add(key, fmt.Sprintf("%t", v))
+		case []interface{}:
+			// 处理数组类型
+			for _, item := range v {
+				values.Add(key, fmt.Sprintf("%v", item))
+			}
+		default:
+			if value != nil {
+				values.Add(key, fmt.Sprintf("%v", value))
+			}
 		}
-		req, err = http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(body))
-	} else {
-		req, err = http.NewRequestWithContext(ctx, method, url, nil)
 	}
+	return values
+}
 
+func headers2zapAny(headers http.Header) map[string]interface{} {
+	headerMap := make(map[string]interface{})
+	for key, values := range headers {
+		headerMap[key] = values
+	}
+	return headerMap
+}
+
+// doRequest 发送HTTP请求
+func (c *APIClient) DoRequest(ctx context.Context, requestURL string, params RequestParam, headers http.Header, method string) (*ResponseData, error) {
+	var req *http.Request
+	body, err := json.Marshal(params)
 	if err != nil {
-		zap.L().Error("Failed to create request", zap.Error(err), zap.String("url", url))
+		zap.L().Warn("Failed to marshal request params", zap.Error(err), zap.String("url", requestURL))
 		return nil, err
 	}
-
-	// 设置请求头,只包含这几个
-	// "x-request-id": headers.get("x-request-id", ""),
-	// "authorization": headers.get("authorization", ""),
-	// "x-costrict-version": headers.get("x-costrict-version", ""),
-	if headers != nil {
-		req.Header.Set("x-request-id", headers["x-request-id"])
-		req.Header.Set("authorization", headers["authorization"])
-		req.Header.Set("x-costrict-version", headers["x-costrict-version"])
+	if method == "POST" {
+		req, err = http.NewRequestWithContext(ctx, method, requestURL, bytes.NewBuffer(body))
+	} else {
+		var paramsMap map[string]interface{}
+		if err := json.Unmarshal(body, &paramsMap); err != nil {
+			zap.L().Warn("Failed to unmarshal params for query", zap.Error(err), zap.String("url", requestURL))
+			return nil, err
+		}
+		query := kvs2UrlValues(paramsMap)
+		rawUrl := requestURL
+		if len(query) > 0 {
+			rawUrl = requestURL + "?" + query.Encode()
+		}
+		req, err = http.NewRequestWithContext(ctx, method, rawUrl, nil)
 	}
+	if err != nil {
+		zap.L().Warn("Failed to create request", zap.Error(err), zap.String("url", requestURL))
+		return nil, err
+	}
+	// 设置请求头,只包含这几个
+	req.Header.Set("X-Request-Id", headers.Get("X-Request-Id"))
+	req.Header.Set("Authorization", headers.Get("Authorization"))
+	req.Header.Set("X-Costrict-Version", headers.Get("X-Costrict-Version"))
 	req.Header.Set("Content-Type", "application/json")
 
-	// 发送请求
 	resp, err := c.client.Do(req)
 	if err != nil {
-		zap.L().Error("Request failed", zap.Error(err), zap.String("url", url))
+		zap.L().Warn("Request failed", zap.Error(err),
+			zap.String("url", requestURL),
+			zap.String("body", string(body)))
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		data, _ := io.ReadAll(resp.Body)
 		zap.L().Warn("Request returned non-200 status",
 			zap.Int("status", resp.StatusCode),
-			zap.String("url", url))
+			zap.String("url", requestURL),
+			zap.Any("headers", headers2zapAny(req.Header)),
+			zap.String("params", string(body)),
+			zap.String("resp", string(data)))
 		return nil, fmt.Errorf("request failed with status %d", resp.StatusCode)
 	}
-
-	// 解析响应
 	var result ResponseData
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		zap.L().Error("Failed to decode response", zap.Error(err))
+		zap.L().Warn("Failed to decode response", zap.Error(err), zap.String("url", requestURL))
 		return nil, err
 	}
-
 	return &result, nil
-}
-
-// SearchDefinition 搜索代码定义
-func (c *APIClient) SearchDefinition(ctx context.Context, clientID, codebasePath, filePath, codeSnippet string, startLine, endLine *int, headers map[string]string) (*ResponseData, error) {
-	params := RequestParam{
-		ClientID:     clientID,
-		CodebasePath: codebasePath,
-		FilePath:     filePath,
-		CodeSnippet:  codeSnippet,
-	}
-
-	if startLine != nil {
-		params.StartLine = *startLine
-	}
-	if endLine != nil {
-		params.EndLine = *endLine
-	}
-
-	return c.doRequest(ctx, c.definitionURL, params, headers, "GET")
-}
-
-// SearchSemantic 语义搜索
-func (c *APIClient) SearchSemantic(ctx context.Context, clientID, codebasePath, query string, headers map[string]string) (*ResponseData, error) {
-	params := RequestParam{
-		ClientID:       clientID,
-		CodebasePath:   codebasePath,
-		Query:          query,
-		TopK:           config.SemanticTopK,
-		ScoreThreshold: config.SemanticScoreThreshold,
-	}
-
-	return c.doRequest(ctx, c.semanticURL, params, headers, "POST")
-}
-
-// SearchRelation 关系检索
-func (c *APIClient) SearchRelation(ctx context.Context, clientID, codebasePath, filePath, codeSnippet string, includeContent bool, maxLayer int, headers map[string]string) (*ResponseData, error) {
-	params := RequestParam{
-		ClientID:       clientID,
-		CodebasePath:   codebasePath,
-		FilePath:       filePath,
-		CodeSnippet:    codeSnippet,
-		MaxLayer:       maxLayer,
-		IncludeContent: includeContent,
-	}
-
-	return c.doRequest(ctx, c.relationURL, params, headers, "GET")
 }
