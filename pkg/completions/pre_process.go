@@ -6,7 +6,7 @@ import (
 )
 
 // 准备prompt，处理前后缀长度并拼接
-func (h *CompletionHandler) preparePrompt(modelInfo *model.OpenAIModel, prefix, suffix, codeContext string) (*PromptResult, error) {
+func (h *CompletionHandler) preparePrompt(modelInfo *model.OpenAIModel, prefix, suffix, codeContext string) *PromptResult {
 	// 处理前缀和可选的代码上下文
 	newPrefix, newCodeContext := h.handlePrompt(prefix, true, codeContext, h.model.Config.MaxPrefixContext)
 	// 处理后缀
@@ -23,7 +23,7 @@ func (h *CompletionHandler) preparePrompt(modelInfo *model.OpenAIModel, prefix, 
 		PromptTokens: promptTokens,
 		NewPrefix:    newPrefix,
 		NewSuffix:    newSuffix,
-	}, nil
+	}
 }
 
 // 处理prompt截断逻辑

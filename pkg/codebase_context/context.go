@@ -131,9 +131,9 @@ func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePa
 }
 
 // 获取上下文信息
-func (c *ContextClient) GetContext(ctx context.Context, clientID, projectPath, filePath, prefix, suffix, importContent string, headers http.Header) (string, error) {
+func (c *ContextClient) GetContext(ctx context.Context, clientID, projectPath, filePath, prefix, suffix, importContent string, headers http.Header) string {
 	if clientID == "" || projectPath == "" || filePath == "" || (prefix == "" && suffix == "") {
-		return "", nil
+		return ""
 	}
 
 	// 构建完整文件路径
@@ -194,7 +194,7 @@ func (c *ContextClient) GetContext(ctx context.Context, clientID, projectPath, f
 	semanticResult := strings.Join(allCodes, "\n")
 
 	// 添加注释
-	return getComment(fullFilePath, semanticResult), nil
+	return getComment(fullFilePath, semanticResult)
 }
 
 // 搜索代码定义

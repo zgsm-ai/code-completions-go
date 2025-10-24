@@ -1,0 +1,299 @@
+basePath: /
+definitions:
+  completions.CalculateHideScore:
+    properties:
+      document_length:
+        type: integer
+      is_whitespace_after_cursor:
+        type: boolean
+      prefix:
+        type: string
+      previous_label:
+        type: integer
+      previous_label_timestamp:
+        type: integer
+      prompt_end_pos:
+        type: integer
+    type: object
+  completions.CompletionChoice:
+    properties:
+      text:
+        type: string
+    type: object
+  completions.CompletionRequest:
+    properties:
+      beta_mode:
+        type: boolean
+      calculate_hide_score:
+        $ref: '#/definitions/completions.CalculateHideScore'
+      client_id:
+        type: string
+      code_path:
+        type: string
+      completion_id:
+        type: string
+      extra:
+        additionalProperties: true
+        type: object
+      file_project_path:
+        type: string
+      git_path:
+        type: string
+      import_content:
+        type: string
+      language_id:
+        type: string
+      model:
+        type: string
+      parent_id:
+        type: string
+      project_path:
+        type: string
+      prompt:
+        type: string
+      prompt_options:
+        $ref: '#/definitions/completions.PromptOptions'
+      repo:
+        type: string
+      stop:
+        items:
+          type: string
+        type: array
+      temperature:
+        type: number
+      trigger_mode:
+        type: string
+      user_id:
+        type: string
+    type: object
+  completions.CompletionResponse:
+    properties:
+      choices:
+        items:
+          $ref: '#/definitions/completions.CompletionChoice'
+        type: array
+      completion_tokens:
+        type: integer
+      id:
+        type: string
+      model:
+        type: string
+      model_choices:
+        items:
+          $ref: '#/definitions/completions.CompletionChoice'
+        type: array
+      model_cost_time:
+        description: ms
+        type: integer
+      model_end_time:
+        type: string
+      model_start_time:
+        description: may null
+        type: string
+      object:
+        type: string
+      prompt:
+        type: string
+      prompt_tokens:
+        type: integer
+      request_time:
+        type: string
+      status:
+        $ref: '#/definitions/model.CompletionStatus'
+    type: object
+  completions.PromptOptions:
+    properties:
+      code_context:
+        type: string
+      cursor_line_prefix:
+        type: string
+      cursor_line_suffix:
+        type: string
+      prefix:
+        type: string
+      suffix:
+        type: string
+    type: object
+  model.CompletionStatus:
+    enum:
+    - sucess
+    - modelError
+    - reqError
+    - empty
+    - processEmpty
+    - serverError
+    - reject
+    - timeout
+    type: string
+    x-enum-comments:
+      CompletionModelError: 模型响应错误
+      CompletionRejected: 根据规则拒绝补全
+      CompletionReqError: 请求存在错误
+      CompletionServerError: 服务端错误
+    x-enum-descriptions:
+    - ""
+    - 模型响应错误
+    - 请求存在错误
+    - ""
+    - ""
+    - 服务端错误
+    - 根据规则拒绝补全
+    - ""
+    x-enum-varnames:
+    - CompletionSuccess
+    - CompletionModelError
+    - CompletionReqError
+    - CompletionEmpty
+    - CompletionProcessEmpty
+    - CompletionServerError
+    - CompletionRejected
+    - CompletionTimeout
+  server.LogSettings:
+    properties:
+      level:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: This is a code completion service API.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Code Completions API
+  version: "1.0"
+paths:
+  /api/completions:
+    post:
+      consumes:
+      - application/json
+      description: 根据提供的代码上下文生成代码补全建议
+      parameters:
+      - description: 补全请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/completions.CompletionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/completions.CompletionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 代码补全
+      tags:
+      - completions
+  /api/example:
+    get:
+      consumes:
+      - application/json
+      description: 返回示例数据
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 示例接口
+      tags:
+      - example
+  /api/logs:
+    post:
+      consumes:
+      - application/json
+      description: 设置应用程序的日志级别
+      parameters:
+      - description: 日志级别设置
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.LogSettings'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 设置日志级别
+      tags:
+      - logs
+  /code-completion/api/v1/completions:
+    post:
+      consumes:
+      - application/json
+      description: 根据提供的代码上下文生成代码补全建议
+      parameters:
+      - description: 补全请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/completions.CompletionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/completions.CompletionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 代码补全
+      tags:
+      - completions
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: 检查服务是否正常运行
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 健康检查
+      tags:
+      - health
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

@@ -1,25 +1,24 @@
 package completions
 
-// CompletionRequest 补全请求结构
+// 补全请求结构
 type CompletionRequest struct {
+	Model              string                 `json:"model,omitempty"`
 	Prompt             string                 `json:"prompt"`
 	PromptOptions      *PromptOptions         `json:"prompt_options,omitempty"`
 	LanguageID         string                 `json:"language_id,omitempty"`
 	ClientID           string                 `json:"client_id,omitempty"`
+	CompletionID       string                 `json:"completion_id,omitempty"`
 	ProjectPath        string                 `json:"project_path,omitempty"`
 	FileProjectPath    string                 `json:"file_project_path,omitempty"`
 	ImportContent      string                 `json:"import_content,omitempty"`
 	Temperature        float64                `json:"temperature,omitempty"`
-	ParentID           string                 `json:"parent_id,omitempty"`
 	TriggerMode        string                 `json:"trigger_mode,omitempty"`
-	Extra              map[string]interface{} `json:"extra,omitempty"`
-	Model              string                 `json:"model,omitempty"`
+	ParentID           string                 `json:"parent_id,omitempty"`
 	Stop               []string               `json:"stop,omitempty"`
-	CompletionID       string                 `json:"completion_id,omitempty"`
 	BetaMode           bool                   `json:"beta_mode,omitempty"`
+	Echo               bool                   `json:"echo,omitempty"`
+	Extra              map[string]interface{} `json:"extra,omitempty"`
 	CalculateHideScore *CalculateHideScore    `json:"calculate_hide_score,omitempty"`
-	// CodePath           string                 `json:"code_path,omitempty"`
-	// UserID             string                 `json:"user_id,omitempty"`
 }
 
 // 提示词选项
@@ -34,7 +33,7 @@ type PromptOptions struct {
 // 计算隐藏分数配置
 type CalculateHideScore struct {
 	IsWhitespaceAfterCursor bool   `json:"is_whitespace_after_cursor"`
-	Prefix                  string `json:"prefix"`
+	Prefix                  string `json:"prefix,omitempty"`
 	DocumentLength          int    `json:"document_length"`
 	PromptEndPos            int    `json:"prompt_end_pos"`
 	PreviousLabel           int    `json:"previous_label"`

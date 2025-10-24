@@ -2,8 +2,10 @@ package completions
 
 import (
 	"code-completion/pkg/completions"
+	"code-completion/pkg/model"
 	"code-completion/pkg/stream_controller"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,28 +31,37 @@ func Completions(c *gin.Context) {
 
 	// 使用流控管理器处理请求
 	if stream_controller.Controller != nil {
-		response, err := stream_controller.Controller.ProcessCompletionRequest(c.Request.Context(), &req, c.Request.Header)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, response)
+		response := stream_controller.Controller.ProcessCompletionRequest(c.Request.Context(), &req, c.Request.Header)
+		// if err != nil {
+		// 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// 	return
+		// }
+		// c.JSON(http.StatusOK, response)
+		respCompletion(c, response)
 		return
 	}
 
 	// 如果流控管理器未初始化，使用原有逻辑
-	completionHandler := completions.NewCompletionHandler()
-	if completionHandler == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create completion handler"})
-		return
+	handler := completions.NewCompletionHandler()
+	perf := &completions.CompletionPerformance{
+		ReceiveTime: time.Now(),
 	}
-	// 处理补全请求
-	response, err := completionHandler.HandleCompletion(c.Request.Context(), &req, c.Request.Header)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
+	rc := completions.NewCompletionContext(c.Request.Context(), perf)
+	response := handler.HandleCompletion(rc, &req, c.Request.Header)
+	// if err != nil {
+	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// 	return
+	// }
 	// 返回响应
-	c.JSON(http.StatusOK, response)
+	//c.JSON(http.StatusOK, response)
+	respCompletion(c, response)
+}
+
+func respCompletion(c *gin.Context, rsp *completions.CompletionResponse) {
+	if rsp.Status != model.CompletionSuccess {
+		//c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, rsp)
+	} else {
+		c.JSON(http.StatusOK, rsp)
+	}
 }

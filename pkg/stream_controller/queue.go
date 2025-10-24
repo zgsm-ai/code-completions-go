@@ -58,7 +58,6 @@ func (m *QueueManager) AddRequest(req *completions.CompletionRequest, ctx contex
 		cancel:       cancel,
 		headers:      headers,
 		ResponseChan: make(chan *completions.CompletionResponse, 1),
-		ErrorChan:    make(chan error, 1),
 	}
 
 	m.global.AddRequest(clientReq)

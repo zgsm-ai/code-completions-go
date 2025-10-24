@@ -3,7 +3,6 @@ package stream_controller
 import (
 	"code-completion/pkg/completions"
 	"code-completion/pkg/config"
-	"fmt"
 	"sync"
 	"time"
 
@@ -16,9 +15,9 @@ import (
 
 // ModelPool 模型请求池
 type ModelPool struct {
-	ModelID   string
+	Model     string
 	cfg       *config.ModelConfig
-	Requests  map[string]*ClientRequest
+	requests  map[string]*ClientRequest
 	mutex     sync.RWMutex
 	semaphore chan struct{}
 }
@@ -55,15 +54,15 @@ func (m *PoolManager) Init() {
 }
 
 // initPool 初始化模型请求池
-func (m *PoolManager) initPool(modelID string, cfg *config.ModelConfig) *ModelPool {
-	if existingPool, exists := m.pools[modelID]; exists {
+func (m *PoolManager) initPool(model string, cfg *config.ModelConfig) *ModelPool {
+	if existingPool, exists := m.pools[model]; exists {
 		close(existingPool.semaphore)
 	}
 
 	pool := &ModelPool{
-		ModelID:   modelID,
+		Model:     model,
 		cfg:       cfg,
-		Requests:  make(map[string]*ClientRequest),
+		requests:  make(map[string]*ClientRequest),
 		semaphore: make(chan struct{}, cfg.MaxConcurrent),
 	}
 
@@ -72,16 +71,16 @@ func (m *PoolManager) initPool(modelID string, cfg *config.ModelConfig) *ModelPo
 		pool.semaphore <- struct{}{}
 	}
 
-	m.pools[modelID] = pool
+	m.pools[model] = pool
 
 	zap.L().Info("Initialize model pool",
-		zap.String("modelID", modelID),
+		zap.String("model", model),
 		zap.Int("maxConcurrent", cfg.MaxConcurrent))
 	return pool
 }
 
 // 等待模型池空闲处理请求
-func (m *PoolManager) DoRequest(req *ClientRequest) (*completions.CompletionResponse, error) {
+func (m *PoolManager) DoRequest(req *ClientRequest) *completions.CompletionResponse {
 	pool, exists := m.pools[req.Request.Model]
 	if !exists {
 		pool = m.def
@@ -92,76 +91,72 @@ func (m *PoolManager) DoRequest(req *ClientRequest) (*completions.CompletionResp
 		return m.processRequest(pool, req)
 	case <-req.ctx.Done(): // 请求被取消
 		zap.L().Warn("Request canceled, Semaphore wait timeout",
-			zap.String("modelID", req.Request.Model),
+			zap.String("model", req.Request.Model),
 			zap.String("clientID", req.Request.ClientID),
 			zap.String("completionID", req.Request.CompletionID),
 			zap.Error(req.ctx.Err()))
-		return nil, req.ctx.Err()
+		return completions.CancelRequest(req.Request, req.ctx.Err())
 	}
 }
 
 // 处理请求
-func (m *PoolManager) processRequest(pool *ModelPool, req *ClientRequest) (*completions.CompletionResponse, error) {
+func (m *PoolManager) processRequest(pool *ModelPool, req *ClientRequest) *completions.CompletionResponse {
 	startTime := time.Now()
 
 	// 将请求添加到活跃请求列表
 	pool.mutex.Lock()
-	pool.Requests[req.Request.CompletionID] = req
+	pool.requests[req.Request.CompletionID] = req
 	req.Pool = pool
 	pool.mutex.Unlock()
 
 	zap.L().Debug("Start processing model request",
-		zap.String("modelID", pool.ModelID),
+		zap.String("model", pool.Model),
 		zap.String("clientID", req.Request.ClientID),
 		zap.String("completionID", req.Request.CompletionID),
-		zap.Int("requests", len(pool.Requests)))
+		zap.Int("requests", len(pool.requests)))
 
 	// 处理完成后释放信号量
 	defer func() {
 		pool.mutex.Lock()
-		delete(pool.Requests, req.Request.CompletionID)
+		delete(pool.requests, req.Request.CompletionID)
 		pool.mutex.Unlock()
 		req.Pool = nil
 		select {
 		case pool.semaphore <- struct{}{}: // 成功释放信号量，表示又有一个空位，可调度补全请求
 		default: // 信号量已满，不应该发生
 			zap.L().Error("Semaphore release failed",
-				zap.String("modelID", pool.ModelID),
+				zap.String("model", pool.Model),
 				zap.String("clientID", req.Request.ClientID),
 				zap.String("completionID", req.Request.CompletionID))
 		}
 		zap.L().Debug("Completed processing model request",
-			zap.String("modelID", pool.ModelID),
+			zap.String("model", pool.Model),
 			zap.String("clientID", req.Request.ClientID),
 			zap.String("completionID", req.Request.CompletionID),
 			zap.Duration("duration", time.Since(startTime)))
 	}()
 	// 使用原有的补全处理器处理请求
 	handler := completions.NewCompletionHandler()
-	if handler == nil {
-		return nil, fmt.Errorf("failed to create completion handler")
-	}
+	c := completions.NewCompletionContext(req.ctx, &req.Perf)
 	// 处理请求
-	return handler.HandleCompletion(req.ctx, req.Request, req.headers)
+	return handler.HandleCompletion(c, req.Request, req.headers)
 }
 
-// GetStats 获取统计信息
+// 获取统计信息
 func (m *PoolManager) GetStats() map[string]interface{} {
 	stats := make(map[string]interface{})
 	stats["total_pools"] = len(m.pools)
 
 	poolDetails := make(map[string]interface{})
-	for modelID, pool := range m.pools {
+	for model, pool := range m.pools {
 		pool.mutex.RLock()
-		poolDetails[modelID] = map[string]interface{}{
+		poolDetails[model] = map[string]interface{}{
 			"max_concurrent":  pool.cfg.MaxConcurrent,
-			"requests":        len(pool.Requests),
+			"requests":        len(pool.requests),
 			"available_slots": len(pool.semaphore),
 		}
 		pool.mutex.RUnlock()
 	}
-
 	stats["pools"] = poolDetails
-
 	return stats
 }

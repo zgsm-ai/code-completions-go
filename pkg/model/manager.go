@@ -3,6 +3,7 @@ package model
 import (
 	"code-completion/pkg/config"
 	"code-completion/pkg/tokenizers"
+	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -19,7 +20,7 @@ func (m *OpenAIModelManager) GetModel() *OpenAIModel {
 	defer m.mutex.Unlock()
 	modelLen := len(m.models)
 	if modelLen == 0 {
-		return nil
+		panic(m)
 	}
 	// 返回新的model,而不是原始的model。
 	var model OpenAIModel
@@ -35,9 +36,9 @@ func (m *OpenAIModelManager) GetModel() *OpenAIModel {
 
 var GlobalModelManager = &OpenAIModelManager{}
 
-func init() {
+func Init(cfgModels []config.ModelConfig) error {
 	models := make([]OpenAIModel, 0)
-	for _, c := range config.Config.Models {
+	for _, c := range cfgModels {
 		token, err := tokenizers.NewTokenizer(c.TokenizerPath)
 		if err != nil {
 			zap.L().Error("init tokenizer error", zap.String("tokenizerPath", c.TokenizerPath), zap.Error(err))
@@ -48,5 +49,10 @@ func init() {
 			Tokenizer: token,
 		})
 	}
+	if len(models) == 0 {
+		zap.L().Fatal("No models available")
+		return fmt.Errorf("no models available")
+	}
 	GlobalModelManager.models = models
+	return nil
 }

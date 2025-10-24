@@ -42,7 +42,7 @@ func (sc *StreamController) Init() {
 }
 
 // 处理补全请求
-func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, req *completions.CompletionRequest, headers http.Header) (*completions.CompletionResponse, error) {
+func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, req *completions.CompletionRequest, headers http.Header) *completions.CompletionResponse {
 	if req.ClientID == "" { // 如果无法获取客户端ID，使用默认处理方式
 		return sc.processWithoutStreamControl(ctx, req, headers)
 	}
@@ -57,15 +57,13 @@ func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, req *c
 	// 等待响应或错误
 	select {
 	case response := <-clientReq.ResponseChan:
-		return response, nil
-	case err := <-clientReq.ErrorChan:
-		return nil, err
+		return response
 	case <-clientReq.ctx.Done():
 		zap.L().Warn("ProcessCompletionRequest context canceled",
 			zap.String("clientID", req.ClientID),
 			zap.String("completionID", req.CompletionID),
 			zap.Error(clientReq.ctx.Err()))
-		return nil, clientReq.ctx.Err()
+		return completions.CancelRequest(clientReq.Request, clientReq.ctx.Err())
 	}
 }
 
@@ -78,25 +76,21 @@ func (sc *StreamController) scheduleRequest() error {
 	}
 
 	// 2. 将请求添加到模型请求池，执行模型调用
-	response, err := sc.pools.DoRequest(req)
+	response := sc.pools.DoRequest(req)
 
 	// 3. 将模型的响应或错误发送到对应的通道
-	if err != nil {
-		req.ErrorChan <- err
-	} else {
-		req.ResponseChan <- response
-	}
-	return err
+	req.ResponseChan <- response
+	return nil
 }
 
 // 不使用流控的处理方式
-func (sc *StreamController) processWithoutStreamControl(ctx context.Context, req *completions.CompletionRequest, headers http.Header) (*completions.CompletionResponse, error) {
+func (sc *StreamController) processWithoutStreamControl(ctx context.Context, req *completions.CompletionRequest, headers http.Header) *completions.CompletionResponse {
 	handler := completions.NewCompletionHandler()
-	if handler == nil {
-		return nil, fmt.Errorf("failed to create completion handler")
+	perf := &completions.CompletionPerformance{
+		ReceiveTime: time.Now(),
 	}
-
-	return handler.HandleCompletion(ctx, req, headers)
+	c := completions.NewCompletionContext(ctx, perf)
+	return handler.HandleCompletion(c, req, headers)
 }
 
 // 启动定期维护的协程

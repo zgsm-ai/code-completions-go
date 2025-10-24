@@ -25,8 +25,10 @@ import (
 	"time"
 
 	_ "code-completion/docs"
+	"code-completion/pkg/config"
 	"code-completion/pkg/logger"
 	_ "code-completion/pkg/logger"
+	"code-completion/pkg/model"
 	"code-completion/pkg/stream_controller"
 	"code-completion/server"
 
@@ -47,10 +49,10 @@ func PrintVersions() {
 }
 
 func main() {
+	PrintVersions()
 	// 初始化时区设置，使程序能够识别容器的TZ环境变量
 	initTimeZone()
 
-	PrintVersions()
 	// 解析命令行参数
 	var (
 		port = flag.String("port", "8080", "服务器端口")
@@ -65,7 +67,7 @@ func main() {
 	logger.SetMode(*mode)
 	defer logger.Sync()
 
-	// 初始化流控管理器
+	initModels()
 	initStreamController()
 
 	// 创建路由
@@ -140,4 +142,11 @@ func initStreamController() {
 	sc := stream_controller.NewStreamController()
 	sc.Init()
 	stream_controller.Controller = sc
+}
+
+func initModels() {
+	zap.L().Info("Initialize model instances")
+	if err := model.Init(config.Config.Models); err != nil {
+		panic(err)
+	}
 }

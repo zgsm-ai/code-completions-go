@@ -16,14 +16,14 @@ import (
 type CompletionStatus string
 
 const (
-	CompletionSucess       CompletionStatus = "sucess"
-	CompletionModelError   CompletionStatus = "modelError" //模型响应错误
-	CompletionReqError     CompletionStatus = "reqError"   //请求存在错误
-	CompletionEmpty        CompletionStatus = "empty"
-	CompletionProcessEmpty CompletionStatus = "processEmpty"
-	CompletionServerError  CompletionStatus = "serverError" //服务端错误
-	CompletionReject       CompletionStatus = "reject"      //根据规则拒绝补全
-	CompletionTimeout      CompletionStatus = "timeout"
+	CompletionSuccess     CompletionStatus = "success"     //补全成功
+	CompletionModelError  CompletionStatus = "modelError"  //模型响应错误
+	CompletionReqError    CompletionStatus = "reqError"    //请求存在错误
+	CompletionServerError CompletionStatus = "serverError" //服务端错误
+	CompletionEmpty       CompletionStatus = "empty"       //补全结果为空
+	CompletionRejected    CompletionStatus = "rejected"    //根据规则拒绝补全
+	CompletionTimeout     CompletionStatus = "timeout"     //补全请求超时
+	CompletionCanceled    CompletionStatus = "canceled"    //用户取消
 )
 
 type OpenAIModel struct {
@@ -97,5 +97,5 @@ func (m *OpenAIModel) Completions(ctx context.Context, data map[string]interface
 	zap.L().Info("Request model succeeded", zap.String("requestId", requestId),
 		zap.Duration("latency", modelEndTime.Sub(modelStartTime)),
 		zap.String("respBody", string(body)))
-	return result, CompletionSucess, &modelStartTime, &modelEndTime
+	return result, CompletionSuccess, &modelStartTime, &modelEndTime
 }
