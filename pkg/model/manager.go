@@ -10,49 +10,67 @@ import (
 )
 
 type OpenAIModelManager struct {
-	models []OpenAIModel
+	models []LLM
 	mutex  sync.Mutex
 	index  int
 }
 
-func (m *OpenAIModelManager) GetModel() *OpenAIModel {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	modelLen := len(m.models)
-	if modelLen == 0 {
-		panic(m)
-	}
-	// 返回新的model,而不是原始的model。
-	var model OpenAIModel
-	if m.index < modelLen {
-		model = m.models[m.index]
-		m.index++
-	} else {
-		m.index = 1
-		model = m.models[0]
-	}
-	return &model
+type NewLLM func(*config.ModelConfig, *tokenizers.Tokenizer) LLM
+
+var modelDefs = map[string]NewLLM{
+	"openai":   NewOpenAIModel,
+	"deepseek": NewOpenAIModel,
 }
 
-var GlobalModelManager = &OpenAIModelManager{}
+func GetAutoModel() LLM {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	modelLen := len(manager.models)
+	if modelLen == 0 {
+		panic(manager)
+	}
+	// 采用轮转法选择模型进行响应
+	var model LLM
+	if manager.index < modelLen {
+		model = manager.models[manager.index]
+		manager.index++
+	} else {
+		manager.index = 1
+		model = manager.models[0]
+	}
+	return model
+}
+
+func GetModel(idx int) LLM {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+
+	if idx >= len(manager.models) {
+		panic(manager)
+	}
+	return manager.models[idx]
+}
+
+var manager = &OpenAIModelManager{}
 
 func Init(cfgModels []config.ModelConfig) error {
-	models := make([]OpenAIModel, 0)
+	models := make([]LLM, 0)
 	for _, c := range cfgModels {
 		token, err := tokenizers.NewTokenizer(c.TokenizerPath)
 		if err != nil {
 			zap.L().Error("init tokenizer error", zap.String("tokenizerPath", c.TokenizerPath), zap.Error(err))
 			continue
 		}
-		models = append(models, OpenAIModel{
-			Config:    c,
-			Tokenizer: token,
-		})
+		newLLM, exists := modelDefs[c.Provider]
+		if !exists {
+			newLLM = NewOpenAIModel
+		}
+		models = append(models, newLLM(&c, token))
 	}
 	if len(models) == 0 {
 		zap.L().Fatal("No models available")
 		return fmt.Errorf("no models available")
 	}
-	GlobalModelManager.models = models
+	manager.models = models
 	return nil
 }

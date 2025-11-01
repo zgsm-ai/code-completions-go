@@ -2,8 +2,8 @@ package completions
 
 import (
 	"context"
+	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"code-completion/pkg/codebase_context"
@@ -15,20 +15,13 @@ import (
 // 补全处理器
 type CompletionHandler struct {
 	contextClient *codebase_context.ContextClient
-	model         *model.OpenAIModel // 模型
+	cfg           *config.ModelConfig
+	llm           model.LLM // 模型
 }
 
 type CompletionContext struct {
 	Ctx  context.Context
 	Perf *CompletionPerformance
-}
-
-// prompt处理结果
-type PromptResult struct {
-	Prompt       string `json:"prompt"`
-	PromptTokens int    `json:"prompt_tokens"`
-	NewPrefix    string `json:"new_prefix"`
-	NewSuffix    string `json:"new_suffix"`
 }
 
 func NewCompletionContext(ctx context.Context, perf *CompletionPerformance) *CompletionContext {
@@ -38,228 +31,109 @@ func NewCompletionContext(ctx context.Context, perf *CompletionPerformance) *Com
 	}
 }
 
-// NewCompletionHandler 创建新的补全处理器
-func NewCompletionHandler() *CompletionHandler {
-	m := model.GlobalModelManager.GetModel()
+// 创建新的补全处理器
+func NewCompletionHandler(m model.LLM) *CompletionHandler {
+	if m == nil {
+		m = model.GetAutoModel()
+	}
 	return &CompletionHandler{
 		contextClient: codebase_context.NewContextClient(),
-		model:         m,
+		llm:           m,
+		cfg:           m.Config(),
 	}
 }
 
 // 处理补全请求
 func (h *CompletionHandler) HandleCompletion(c *CompletionContext, req *CompletionRequest, headers http.Header) *CompletionResponse {
-	// startTime := time.Now()
-	c.Perf.StartTime = time.Now()
+	c.Perf.StartTime = time.Now().Local()
+	c.Perf.QueueDuration = time.Since(c.Perf.ReceiveTime)
 
+	var para model.CompletionParameter
 	// 0. 补全拒绝规则链处理
-	rejectResult := DefaultCompletionRejectRuleChain.Handle(req)
-	if rejectResult != nil {
-		totalDuration := float64(time.Since(c.Perf.ReceiveTime).Milliseconds())
-		metrics.RecordCompletionTotalDuration(req.Model, metrics.StatusReject, totalDuration)
-		metrics.IncrementCompletionRequests(req.Model, metrics.StatusReject)
-
-		return RejectRequest(req)
+	err := NewFilterChain(&config.Config.CompletionsConfig).Handle(req)
+	if err != nil {
+		c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
+		metrics.RecordCompletionDuration(h.cfg.ModelName, metrics.StatusReject,
+			c.Perf.QueueDuration, c.Perf.ContextDuration,
+			c.Perf.LLMDuration, c.Perf.TotalDuration)
+		metrics.IncrementCompletionRequests(h.cfg.ModelName, metrics.StatusReject)
+		return RejectRequest(req, c.Perf, err)
 	}
 
 	// 1. 解析请求参数
-	prefix, suffix, linePrefix, lineSuffix, codeContext := h.parsePrompt(req)
+	ppt := h.parsePrompt(req)
 
 	// 2. 获取上下文信息
-	if codeContext == "" {
-		codeContext = h.getContext(c.Ctx, req, prefix, suffix, headers)
+	if ppt.CodeContext == "" {
+		ppt.CodeContext = h.getContext(c.Ctx, req, ppt.Prefix, ppt.Suffix, headers)
+		c.Perf.ContextDuration = time.Since(c.Perf.StartTime)
 	}
 	// 3. 补全前置处理 （拼接prompt策略，单行/多行补全策略）
-	promptResult := h.preparePrompt(h.model, prefix, suffix, codeContext)
+	h.truncatePrompt(h.cfg, ppt)
 
-	// 4. 判断是否为单行补全
-	isSingleCompletion := h.judgeSingleCompletion(linePrefix, lineSuffix, req.LanguageID)
-	if isSingleCompletion {
-		if len(req.Stop) > 0 {
-			req.Stop = append(req.Stop, "\n")
-		} else {
-			req.Stop = []string{"\n"}
-		}
-	}
+	// 4. 准备停用词，根据是否单行补全调整停用词
+	stopWords := h.prepareStopWords(ppt, req)
 
-	// 5. 准备停用词
-	stopWords := h.prepareStopWords(suffix, req)
+	// 5. 交给模型处理
+	para.Model = req.Model
+	para.ClientID = req.ClientID
+	para.CompletionID = req.CompletionID
+	para.Prefix = ppt.Prefix
+	para.Suffix = ppt.Suffix
+	para.CodeContext = ppt.CodeContext
+	para.Stop = stopWords
+	para.MaxTokens = h.cfg.MaxOuputToken
+	para.Temperature = float32(req.Temperature)
 
-	// 6. 交给模型处理
-	completionData := map[string]interface{}{
-		"prompt":            promptResult.Prompt,
-		"prompt_tokens":     promptResult.PromptTokens,
-		"stop":              stopWords,
-		"temperature":       req.Temperature,
-		"max_tokens":        h.model.Config.MaxOuputToken,
-		"presence_penalty":  0.0,
-		"frequency_penalty": 0.0,
-		"top_p":             1,
-		"stream":            false,
-	}
-	// completionDatas := model.CompletionRequest{}
-	c.Perf.ModelStartTime = time.Now()
-	result, completionStatus, reqStartTime, reqEndTime := h.model.Completions(c.Ctx, completionData, req.CompletionID)
-	c.Perf.ModelEndTime = time.Now()
-
-	// 记录模型推理耗时
-	var modelDuration float64
-	if reqStartTime != nil && reqEndTime != nil {
-		modelDuration = float64(reqEndTime.Sub(*reqStartTime).Milliseconds())
-	} else {
-		modelDuration = float64(time.Since(c.Perf.ReceiveTime).Milliseconds())
-	}
+	c.Perf.ModelStartTime = time.Now().Local()
+	rsp, dbg, completionStatus, err := h.llm.Completions(c.Ctx, &para)
+	c.Perf.ModelEndTime = time.Now().Local()
+	c.Perf.LLMDuration = c.Perf.ModelEndTime.Sub(c.Perf.ModelStartTime)
 
 	if completionStatus != model.CompletionSuccess {
-		// 记录模型错误指标
+		c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
+		c.Perf.PromptTokens = h.getTokensCount(ppt.Prefix) + h.getTokensCount(ppt.CodeContext)
 		status := metrics.Status(completionStatus)
-		totalDuration := float64(time.Since(c.Perf.ReceiveTime).Milliseconds())
-		metrics.RecordCompletionTotalDuration(req.Model, status, totalDuration)
-		metrics.RecordCompletionModelDuration(req.Model, status, modelDuration)
-		metrics.IncrementCompletionRequests(req.Model, status)
-		metrics.RecordCompletionTokens(metrics.TokenTypeInput, req.Model, promptResult.PromptTokens)
-
-		return ErrorResponse(req, completionStatus, c.Perf, promptResult.Prompt, []CompletionChoice{})
+		metrics.RecordCompletionDuration(h.cfg.ModelName, status,
+			c.Perf.QueueDuration, c.Perf.ContextDuration,
+			c.Perf.LLMDuration, c.Perf.TotalDuration)
+		metrics.IncrementCompletionRequests(h.cfg.ModelName, status)
+		metrics.RecordCompletionTokens(h.cfg.ModelName, metrics.TokenTypeInput, c.Perf.PromptTokens)
+		metrics.RecordCompletionTokens(h.cfg.ModelName, metrics.TokenTypeOutput, 0)
+		return ErrorResponse(req, completionStatus, c.Perf, dbg, err)
 	}
 
 	// 6. 补全后置处理
 	var completionText string
-	var modelChoices []CompletionChoice
-
-	// 从模型结果中获取补全文本，这里需要根据实际的模型返回结构进行调整
-	if result != nil {
-		if choices, ok := result["choices"].([]interface{}); ok && len(choices) > 0 {
-			// 获取第一个choice作为主要补全文本
-			if choice, ok := choices[0].(map[string]interface{}); ok {
-				if text, ok := choice["text"].(string); ok {
-					completionText = text
-				}
-			}
-
-			// 提取所有choices作为ModelChoices
-			for _, choiceInterface := range choices {
-				if choice, ok := choiceInterface.(map[string]interface{}); ok {
-					if text, ok := choice["text"].(string); ok {
-						modelChoices = append(modelChoices, CompletionChoice{Text: text})
-					}
-				}
-			}
-		}
+	if len(rsp.Choices) > 0 {
+		completionText = rsp.Choices[0].Text
 	}
-
-	// 创建补全后置处理器，处理补全结果
-	if completionText != "" {
-		postprocessorContext := &PostprocessorContext{
-			Language:       req.LanguageID,
-			CompletionCode: completionText,
-			Prefix:         prefix,
-			Suffix:         suffix,
-		}
-
-		chain := NewDefaultPostprocessorChain(req.CompletionID)
-		chain.Process(postprocessorContext)
-
-		// 去除补全内容后空格
-		completionText = strings.TrimSpace(postprocessorContext.CompletionCode)
+	if completionText != "" && !h.cfg.DisablePrune {
+		completionText = h.pruneCompletionCode(completionText, ppt.Prefix, ppt.Suffix, req.LanguageID)
 	}
+	c.Perf.PromptTokens = rsp.Usage.PromptTokens
+	c.Perf.CompletionTokens = rsp.Usage.CompletionTokens
+	c.Perf.TotalTokens = c.Perf.CompletionTokens + c.Perf.PromptTokens
+	c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
 
 	if completionText == "" {
-		// 记录空结果指标
-		totalDuration := float64(time.Since(c.Perf.ReceiveTime).Milliseconds())
-		metrics.RecordCompletionTotalDuration(req.Model, metrics.StatusEmpty, totalDuration)
-		metrics.RecordCompletionModelDuration(req.Model, metrics.StatusEmpty, modelDuration)
-		metrics.IncrementCompletionRequests(req.Model, metrics.StatusEmpty)
-		metrics.RecordCompletionTokens(metrics.TokenTypeInput, req.Model, promptResult.PromptTokens)
-
-		return ErrorResponse(req, model.CompletionEmpty, c.Perf, promptResult.Prompt, modelChoices)
+		metrics.RecordCompletionDuration(h.cfg.ModelName, metrics.StatusEmpty,
+			c.Perf.QueueDuration, c.Perf.ContextDuration,
+			c.Perf.LLMDuration, c.Perf.TotalDuration)
+		metrics.IncrementCompletionRequests(h.cfg.ModelName, metrics.StatusEmpty)
+		metrics.RecordCompletionTokens(h.cfg.ModelName, metrics.TokenTypeInput, c.Perf.PromptTokens)
+		metrics.RecordCompletionTokens(h.cfg.ModelName, metrics.TokenTypeOutput, 0)
+		return ErrorResponse(req, model.CompletionEmpty, c.Perf, dbg, fmt.Errorf("empty"))
 	}
-
-	// 7. 构建响应
-	response := SuccessResponse(req, completionText, startTime, promptResult.Prompt, promptResult.PromptTokens,
-		reqStartTime, reqEndTime, 0, modelChoices)
 
 	// 记录成功指标
-	totalDuration := float64(time.Since(c.Perf.ReceiveTime).Milliseconds())
-	metrics.RecordCompletionTotalDuration(req.Model, metrics.StatusSucess, totalDuration)
-	metrics.RecordCompletionModelDuration(req.Model, metrics.StatusSucess, modelDuration)
-	metrics.IncrementCompletionRequests(req.Model, metrics.StatusSucess)
-	metrics.RecordCompletionTokens(metrics.TokenTypeInput, req.Model, promptResult.PromptTokens)
-	metrics.RecordCompletionTokens(metrics.TokenTypeOutput, req.Model, len(completionText))
+	metrics.RecordCompletionDuration(h.cfg.ModelName, metrics.StatusSuccess,
+		c.Perf.QueueDuration, c.Perf.ContextDuration,
+		c.Perf.LLMDuration, c.Perf.TotalDuration)
+	metrics.IncrementCompletionRequests(h.cfg.ModelName, metrics.StatusSuccess)
+	metrics.RecordCompletionTokens(h.cfg.ModelName, metrics.TokenTypeInput, c.Perf.PromptTokens)
+	metrics.RecordCompletionTokens(h.cfg.ModelName, metrics.TokenTypeOutput, c.Perf.CompletionTokens)
 
-	return response
-}
-
-// parsePrompt 解析提示词
-func (h *CompletionHandler) parsePrompt(req *CompletionRequest) (prefix, suffix, linePrefix, lineSuffix, codeContext string) {
-	if req.PromptOptions != nil {
-		prefix = req.PromptOptions.Prefix
-		suffix = req.PromptOptions.Suffix
-		linePrefix = req.PromptOptions.CursorLinePrefix
-		lineSuffix = req.PromptOptions.CursorLineSuffix
-		codeContext = req.PromptOptions.CodeContext
-	} else {
-		// 简单的提示词解析逻辑，参考Python代码
-		prefix = req.Prompt
-		// 可以根据FIM_INDICATOR分割prompt来获取prefix和suffix
-	}
-
-	// 如果linePrefix为空，从prefix中提取
-	if linePrefix == "" && prefix != "" {
-		lines := strings.Split(prefix, "\n")
-		if len(lines) > 0 {
-			linePrefix = lines[len(lines)-1]
-		}
-	}
-
-	// 如果lineSuffix为空，从suffix中提取
-	if lineSuffix == "" && suffix != "" {
-		lines := strings.Split(suffix, "\n")
-		if len(lines) > 0 {
-			lineSuffix = lines[0]
-			if len(lines) > 1 {
-				lineSuffix += "\n"
-			}
-		}
-	}
-
-	return prefix, suffix, linePrefix, lineSuffix, codeContext
-}
-
-// getPromptTemplate 获取prompt模板
-func (h *CompletionHandler) getPromptTemplate(prefix, suffix, codeContext string, modelConfig *config.ModelConfig) string {
-	return modelConfig.FimPrefix + codeContext + "\n" + prefix + modelConfig.FimSuffix + suffix + modelConfig.FimMiddle
-}
-
-// 准备停用词
-func (h *CompletionHandler) prepareStopWords(suffix string, req *CompletionRequest) []string {
-	var stopWords []string
-
-	// 添加请求中的停用词
-	if len(req.Stop) > 0 {
-		stopWords = append(stopWords, req.Stop...)
-	}
-
-	// 添加默认的FIM停用词
-	stopWords = append(stopWords, "<｜end▁of▁sentence｜>")
-
-	// 如果后缀为空，添加系统停用词
-	if suffix == "" || strings.TrimSpace(suffix) == "" {
-		stopWords = append(stopWords, "\n\n", "\n\n\n")
-	}
-
-	return stopWords
-}
-
-// 获取上下文信息
-func (h *CompletionHandler) getContext(ctx context.Context, req *CompletionRequest, prefix, suffix string, headers http.Header) string {
-	return h.contextClient.GetContext(
-		ctx,
-		req.ClientID,
-		req.ProjectPath,
-		req.FileProjectPath,
-		prefix,
-		suffix,
-		req.ImportContent,
-		headers,
-	)
+	// 7. 构建响应
+	return SuccessResponse(req, completionText, c.Perf, dbg)
 }

@@ -10,6 +10,40 @@ MODEL=""
 TEMPERATURE=""
 MAX_TOKENS=""
 SUFFIX=""
+NO_DEBUG=""
+OUTPUT=""
+
+# 解析FIM格式的文件
+function parse_fim_file() {
+  local file_path="$1"
+  
+  # 检查文件是否存在
+  if [ ! -f "$file_path" ]; then
+    echo "错误: 文件 $file_path 不存在"
+    exit 1
+  fi
+  
+  # 读取文件内容
+  local file_content=$(cat "$file_path")
+    
+  if ! echo "$file_content" | grep -q "<｜fim▁hole｜>"; then
+    echo "错误: 文件中缺少 <｜fim▁hole｜> 标记"
+    exit 1
+  fi
+    
+  # 提取prefix: 从文件开头到<｜fim▁hole｜>的内容
+  local hole_marker="<｜fim▁hole｜>"
+  local prefix=$(echo "$file_content" | sed -n "1,/$hole_marker/p" | sed '$d')
+  
+  # 提取suffix: 从<｜fim▁hole｜>到文件结尾的内容
+  local suffix=$(echo "$file_content" | sed -n "/$hole_marker/,\$p" | sed '1d')
+
+  # 更新DATA变量中的suffix字段
+  DATA=`jq --arg suffix "$suffix" '.suffix = $suffix' <<< "$DATA"`
+  
+  # 更新DATA变量中的prompt字段
+  DATA=`jq --arg prompt "$prefix" '.prompt = $prompt' <<< "$DATA"`
+}
 
 function print_help() {
   echo "Usage: $0 {-a addr} [options]"
@@ -23,10 +57,12 @@ function print_help() {
   echo "  -t temperature: 温度值"
   echo "  -M max_tokens: 最大令牌数"
   echo "  -s suffix: 后缀"
+  echo "  -n: 仅输出curl获取的数据内容，不输出调试信息"
+  echo "  -o output: 输出文件名"
   echo "  -h: 帮助"
 }
 # 初始化选项
-while getopts "a:p:d:f:F:k:m:s:t:M:h" opt; do
+while getopts "a:p:d:f:F:k:m:s:t:M:hno:" opt; do
   case "$opt" in
     a)
       ADDR="$OPTARG"
@@ -58,17 +94,28 @@ while getopts "a:p:d:f:F:k:m:s:t:M:h" opt; do
     s)
       SUFFIX="$OPTARG"
       ;;
+    n)
+      NO_DEBUG="true"
+      ;;
+    o)
+      OUTPUT="$OPTARG"
+      ;;
     h)
       print_help
       exit 0
       ;;
-    *) 
+    *)
       echo "无效选项"
       print_help
       exit 1
       ;;
   esac
 done
+
+# 如果指定了输出文件，则使用exec重定向整个脚本的输出
+if [ X"$OUTPUT" != X"" ]; then
+  exec > "$OUTPUT" 2>&1
+fi
 
 TEMP='{
   "model": "DeepSeek-Coder-V2-Lite-Base",
@@ -89,7 +136,14 @@ fi
 if [ X"$PROMPT" != X"" ]; then
   DATA=`jq --arg newValue "$PROMPT" '.prompt = $newValue' <<< "$DATA"`
 elif [ X"$PFILE" != X"" ]; then
-  DATA=`jq --arg newValue "$(cat $PFILE)" '.prompt = $newValue' <<< "$DATA"`
+  # 检查文件是否包含FIM标记
+  if grep -q "<｜fim▁hole｜>" "$PFILE" 2>/dev/null; then
+    # 使用FIM解析函数
+    parse_fim_file "$PFILE"
+  else
+    # 使用原有逻辑，将整个文件内容作为prompt
+    DATA=`jq --arg newValue "$(cat $PFILE)" '.prompt = $newValue' <<< "$DATA"`
+  fi
 fi
 
 if [ X"$TEMPERATURE" != X"" ]; then
@@ -118,7 +172,13 @@ if [ X"$APIKEY" != X"" ]; then
   HEADERS+=("-H" "Authorization: Bearer $APIKEY")
 fi
 
-echo curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
-curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
+if [ X"$NO_DEBUG" == X"true" ]; then
+  # 仅输出curl获取的数据内容，不包含HTTP头信息
+  curl -s $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
+else
+  # 输出调试信息和完整响应
+  echo curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
+  curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
+fi
 
 

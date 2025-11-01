@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // Completions 补全接口路由处理
@@ -31,37 +32,45 @@ func Completions(c *gin.Context) {
 
 	// 使用流控管理器处理请求
 	if stream_controller.Controller != nil {
-		response := stream_controller.Controller.ProcessCompletionRequest(c.Request.Context(), &req, c.Request.Header)
-		// if err != nil {
-		// 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		// 	return
-		// }
-		// c.JSON(http.StatusOK, response)
-		respCompletion(c, response)
+		rsp := stream_controller.Controller.ProcessCompletionRequest(c.Request.Context(), &req, c.Request.Header)
+		respCompletion(c, &req, rsp)
 		return
 	}
 
 	// 如果流控管理器未初始化，使用原有逻辑
-	handler := completions.NewCompletionHandler()
+	handler := completions.NewCompletionHandler(nil)
 	perf := &completions.CompletionPerformance{
-		ReceiveTime: time.Now(),
+		ReceiveTime: time.Now().Local(),
 	}
 	rc := completions.NewCompletionContext(c.Request.Context(), perf)
-	response := handler.HandleCompletion(rc, &req, c.Request.Header)
-	// if err != nil {
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-	// 	return
-	// }
-	// 返回响应
-	//c.JSON(http.StatusOK, response)
-	respCompletion(c, response)
+	rsp := handler.HandleCompletion(rc, &req, c.Request.Header)
+	respCompletion(c, &req, rsp)
 }
 
-func respCompletion(c *gin.Context, rsp *completions.CompletionResponse) {
+func respCompletion(c *gin.Context, req *completions.CompletionRequest, rsp *completions.CompletionResponse) {
 	if rsp.Status != model.CompletionSuccess {
-		//c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		c.JSON(http.StatusInternalServerError, rsp)
+		zap.L().Warn("completion error", zap.String("completionID", rsp.ID),
+			zap.String("clientID", req.ClientID),
+			zap.String("status", string(rsp.Status)),
+			zap.Any("response", rsp))
 	} else {
-		c.JSON(http.StatusOK, rsp)
+		zap.L().Info("completion succeeded", zap.String("completionID", rsp.ID),
+			zap.String("clientID", req.ClientID),
+			zap.Any("response", rsp))
 	}
+	statusCode := http.StatusOK
+	switch rsp.Status {
+	case model.CompletionSuccess:
+		statusCode = http.StatusOK
+	case model.CompletionCanceled:
+		statusCode = http.StatusRequestTimeout
+	case model.CompletionTimeout:
+		statusCode = http.StatusGatewayTimeout
+	case model.CompletionReqError:
+	case model.CompletionRejected:
+		statusCode = http.StatusBadRequest
+	default:
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, rsp)
 }

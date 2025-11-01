@@ -16,7 +16,7 @@ type CompletionRequest struct {
 	ParentID           string                 `json:"parent_id,omitempty"`
 	Stop               []string               `json:"stop,omitempty"`
 	BetaMode           bool                   `json:"beta_mode,omitempty"`
-	Echo               bool                   `json:"echo,omitempty"`
+	Verbose            bool                   `json:"verbose,omitempty"`
 	Extra              map[string]interface{} `json:"extra,omitempty"`
 	CalculateHideScore *CalculateHideScore    `json:"calculate_hide_score,omitempty"`
 }

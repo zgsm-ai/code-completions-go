@@ -3,6 +3,7 @@ package metrics
 import (
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -10,24 +11,13 @@ import (
 )
 
 var (
-	// 总耗时分布指标 (Histogram)
-	completionTotalDurationSeconds = promauto.NewHistogramVec(
+	completionDurations = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "completion_total_duration_milliseconds",
-			Help:    "Total duration of completion requests in milliseconds",
+			Name:    "completion_durations",
+			Help:    "Duration of each phase of completion requests in milliseconds",
 			Buckets: []float64{10, 50, 100, 150, 200, 300, 400, 500, 600, 800, 1000, 1500, 2000, 2500, 5000, 10000},
 		},
-		[]string{"model", "status"},
-	)
-
-	// 模型耗时分布指标 (Histogram)
-	completionModelDurationSeconds = promauto.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "completion_model_duration_milliseconds",
-			Help:    "Model inference duration of completion requests in milliseconds",
-			Buckets: []float64{10, 50, 100, 150, 200, 300, 400, 500, 600, 800, 1000, 1500, 2000, 2500, 5000, 10000},
-		},
-		[]string{"model", "status"},
+		[]string{"model", "status", "phase"},
 	)
 
 	// Token数量分布指标 (Histogram)
@@ -37,7 +27,7 @@ var (
 			Help:    "Number of input/output tokens in completion requests",
 			Buckets: []float64{10, 50, 100, 300, 500, 1000, 2000, 3000, 4000, 5000, 10000, 50000},
 		},
-		[]string{"type", "model"},
+		[]string{"model", "type"},
 	)
 
 	// 请求总数指标 (Counter)
@@ -53,30 +43,30 @@ var (
 	metricsMutex sync.Mutex
 )
 
-// Phase 定义请求阶段
-type Phase string
-
-const (
-	PhaseTotal   Phase = "total"
-	PhaseContext Phase = "context"
-	PhaseLLM     Phase = "llm"
-)
-
 // Status 定义请求状态
 type Status string
 
 const (
-	StatusSucess       Status = "sucess"
-	StatusModelError   Status = "modelError"
-	StatusReqError     Status = "reqError"
-	StatusEmpty        Status = "empty"
-	StatusProcessEmpty Status = "ProcessEmpty"
-	StatusServerError  Status = "serverError"
-	StatusReject       Status = "reject"
-	StatusTimeout      Status = "timeout"
+	StatusSuccess     Status = "success"
+	StatusModelError  Status = "modelError"
+	StatusReqError    Status = "reqError"
+	StatusServerError Status = "serverError"
+	StatusEmpty       Status = "empty"
+	StatusReject      Status = "rejected"
+	StatusTimeout     Status = "timeout"
+	StatusCanceled    Status = "canceled"
 )
 
-// TokenType 定义token类型
+type CompletionPhase string
+
+const (
+	PhaseQueue   CompletionPhase = "queue"
+	PhaseContext CompletionPhase = "context"
+	PhaseLLM     CompletionPhase = "llm"
+	PhaseTotal   CompletionPhase = "total"
+)
+
+// 定义token类型
 type TokenType string
 
 const (
@@ -84,41 +74,29 @@ const (
 	TokenTypeOutput TokenType = "output"
 )
 
-// 记录请求总耗时分布
-func RecordCompletionTotalDuration(model string, status Status, duration float64) {
+// 记录补全各阶段耗时
+func RecordCompletionDuration(model string, status Status, queue, context, llm, total time.Duration) {
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
 
-	completionTotalDurationSeconds.WithLabelValues(model, string(status)).Observe(duration)
-}
-
-// 记录模型推理耗时分布
-func RecordCompletionModelDuration(model string, status Status, duration float64) {
-	metricsMutex.Lock()
-	defer metricsMutex.Unlock()
-
-	completionModelDurationSeconds.WithLabelValues(model, string(status)).Observe(duration)
-}
-
-// 记录请求在不同阶段的耗时分布 (保持向后兼容)
-func RecordCompletionDuration(phase Phase, model string, status Status, duration float64) {
-	metricsMutex.Lock()
-	defer metricsMutex.Unlock()
-
-	switch phase {
-	case PhaseTotal:
-		completionTotalDurationSeconds.WithLabelValues(model, string(status)).Observe(duration)
-	case PhaseLLM:
-		completionModelDurationSeconds.WithLabelValues(model, string(status)).Observe(duration)
-	}
+	// if queue != 0 {
+	completionDurations.WithLabelValues(model, string(status), "queue").Observe(float64(queue.Milliseconds()))
+	// }
+	// if context != 0 {
+	completionDurations.WithLabelValues(model, string(status), "context").Observe(float64(context.Milliseconds()))
+	// }
+	// if llm != 0 {
+	completionDurations.WithLabelValues(model, string(status), "llm").Observe(float64(llm.Milliseconds()))
+	// }
+	completionDurations.WithLabelValues(model, string(status), "total").Observe(float64(total.Milliseconds()))
 }
 
 // 记录每次请求的输入和输出token数分布
-func RecordCompletionTokens(tokenType TokenType, model string, tokenCount int) {
+func RecordCompletionTokens(model string, tokenType TokenType, tokenCount int) {
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
 
-	completionTokens.WithLabelValues(string(tokenType), model).Observe(float64(tokenCount))
+	completionTokens.WithLabelValues(model, string(tokenType)).Observe(float64(tokenCount))
 }
 
 // 记录请求总数，用于计算QPS和错误率

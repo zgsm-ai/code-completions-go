@@ -11,20 +11,62 @@ TEMPERATURE=""
 MAX_TOKENS=""
 COMPLETION_ID=""
 CLIENT_ID=""
-PROJECT_PATH=""
+PROJECT_PATH="$PWD"
 FILE_PROJECT_PATH=""
 LANGUAGE_ID=""
-ECHO=""
 STREAM=""
 TRIGGER_MODE=""
+NO_DEBUG=""
+VERBOSE=""
+OUTPUT=""
+
+# 解析FIM格式的文件
+function parse_fim_file() {
+  local file_path="$1"
+  
+  # 检查文件是否存在
+  if [ ! -f "$file_path" ]; then
+    echo "错误: 文件 $file_path 不存在"
+    exit 1
+  fi
+  
+  # 读取文件内容
+  local file_content=$(cat "$file_path")
+    
+  if ! echo "$file_content" | grep -q "<｜fim▁hole｜>"; then
+    echo "错误: 文件中缺少 <｜fim▁hole｜> 标记"
+    exit 1
+  fi
+    
+  # 提取prefix: 从文件开头到<｜fim▁hole｜>的内容
+  local hole_marker="<｜fim▁hole｜>"
+  local prefix=$(echo "$file_content" | sed -n "1,/$hole_marker/p" | sed '$d')
+  
+  # 提取suffix: 从<｜fim▁hole｜>到文件结尾的内容
+  local suffix=$(echo "$file_content" | sed -n "/$hole_marker/,\$p" | sed '1d')
+  
+  # 提取cursor_line_prefix: <｜fim▁hole｜>所在行前面的内容
+  local hole_line=$(echo "$file_content" | grep -n "$hole_marker" | cut -d: -f1)
+  local cursor_line_prefix=$(echo "$file_content" | sed -n "${hole_line}p" | sed "s/$hole_marker.*//")
+  
+  # 提取cursor_line_suffix: <｜fim▁hole｜>所在行后面的内容
+  local cursor_line_suffix=$(echo "$file_content" | sed -n "${hole_line}p" | sed "s/.*$hole_marker//")
+  
+  # 更新DATA变量中的prompt_options字段，如果不存在则创建
+  DATA=`jq --arg prefix "$prefix" --arg suffix "$suffix" --arg cursor_line_prefix "$cursor_line_prefix" --arg cursor_line_suffix "$cursor_line_suffix" '. + {prompt_options: {prefix: $prefix, suffix: $suffix, cursor_line_prefix: $cursor_line_prefix, cursor_line_suffix: $cursor_line_suffix}}' <<< "$DATA"`
+  
+  # 同时清除prompt字段
+  DATA=`jq --arg prompt "" '.prompt = $prompt' <<< "$DATA"`
+}
 
 function print_help() {
   echo "Usage: $0 [-a addr] [options]"
   echo "  -a addr: 地址"
   echo "  -p prompt: 提示前缀"
   echo "  -d data: 补全消息"
-  echo "  -f prompt-file: 含提示前缀的文件"
+  echo "  -f prompt-file: 含提示前缀的文件，支持FIM格式(...<｜fim▁hole｜>...)"
   echo "  -F data-file: 含完整补全消息的文件"
+  echo "  -o output: 输出文件名"
   echo "  -k apikey: 密钥"
   echo "  -m model: 模型"
   echo "  -t temperature: 温度值"
@@ -35,12 +77,13 @@ function print_help() {
   echo "  -C file_project_path: 文件项目路径"
   echo "  -l language_id: 语言ID"
   echo "  -r trigger_mode: 触发模式"
-  echo "  -e: 开启回显"
   echo "  -s: 开启流式输出"
+  echo "  -n: 不输出调试信息"
+  echo "  -v: 开启verbose模式"
   echo "  -h: 帮助"
 }
 # 初始化选项
-while getopts "a:p:d:f:F:k:m:i:c:P:C:l:t:M:r:esh" opt; do
+while getopts "a:p:d:f:F:k:m:i:c:P:C:l:t:M:r:o:nsvh" opt; do
   case "$opt" in
     a)
       ADDR="$OPTARG"
@@ -87,11 +130,17 @@ while getopts "a:p:d:f:F:k:m:i:c:P:C:l:t:M:r:esh" opt; do
     r)
       TRIGGER_MODE="$OPTARG"
       ;;
-    e)
-      ECHO="true"
-      ;;
     s)
       STREAM="true"
+      ;;
+    n)
+      NO_DEBUG="true"
+      ;;
+    v)
+      VERBOSE="true"
+      ;;
+    o)
+      OUTPUT="$OPTARG"
       ;;
     h)
       print_help
@@ -105,6 +154,11 @@ while getopts "a:p:d:f:F:k:m:i:c:P:C:l:t:M:r:esh" opt; do
   esac
 done
 
+# 如果指定了输出文件，则使用exec重定向整个脚本的输出
+if [ X"$OUTPUT" != X"" ]; then
+  exec > "$OUTPUT" 2>&1
+fi
+
 TEMP='{
   "model": "DeepSeek-Coder-V2-Lite-Base",
   "prompt": "#!/usr/bin/env python\n# coding: utf-8\nimport time\nimport base64\ndef trace(rsp):\n    print",
@@ -113,11 +167,11 @@ TEMP='{
   "stop": [],
   "beta_mode": false,
   "stream": false,
-  "echo": false,
+  "verbose": false,
   "language_id": "python",
   "trigger_mode": "manual",
-  "project_path": "g:/tmp/projects/c/redis",
-  "file_project_path": "g:/tmp/projects/c/redis/src/ae.c",
+  "project_path": "'"$PWD"'",
+  "file_project_path": "test.py",
   "client_id": "zbc-test",
   "completion_id": "666-94131415"
 }'
@@ -131,7 +185,14 @@ fi
 if [ X"$PROMPT" != X"" ]; then
   DATA=`jq --arg newValue "$PROMPT" '.prompt = $newValue' <<< "$DATA"`
 elif [ X"$PFILE" != X"" ]; then
-  DATA=`jq --arg newValue "$(cat $PFILE)" '.prompt = $newValue' <<< "$DATA"`
+  # 检查文件是否包含FIM标记
+  if grep -q "<｜fim▁hole｜>" "$PFILE" 2>/dev/null; then
+    # 使用FIM解析函数
+    parse_fim_file "$PFILE"
+  else
+    # 使用原有逻辑，将整个文件内容作为prompt
+    DATA=`jq --arg newValue "$(cat $PFILE)" '.prompt = $newValue' <<< "$DATA"`
+  fi
 fi
 
 if [ X"$TEMPERATURE" != X"" ]; then
@@ -160,6 +221,22 @@ if [ X"$PROJECT_PATH" != X"" ]; then
   DATA=`jq --arg newValue "$PROJECT_PATH" '.project_path = $newValue' <<< "$DATA"`
 fi
 
+if [ X"$FILE_PROJECT_PATH" == X"" ]; then
+  if [ X"$PFILE" != X"" ]; then
+    # 转换为绝对路径，兼容Windows和Unix系统
+    case "$PFILE" in
+      /*|[A-Za-z]:/*|[A-Za-z]:\\*)
+        # Unix绝对路径或Windows绝对路径
+        FILE_PROJECT_PATH="$PFILE"
+        ;;
+      *)
+        # 相对路径，转换为绝对路径
+        FILE_PROJECT_PATH="$(pwd)/$PFILE"
+        ;;
+    esac
+  fi
+fi
+
 if [ X"$FILE_PROJECT_PATH" != X"" ]; then
   DATA=`jq --arg newValue "$FILE_PROJECT_PATH" '.file_project_path = $newValue' <<< "$DATA"`
 fi
@@ -172,12 +249,12 @@ if [ X"$TRIGGER_MODE" != X"" ]; then
   DATA=`jq --arg newValue "$TRIGGER_MODE" '.trigger_mode = $newValue' <<< "$DATA"`
 fi
 
-if [ X"$ECHO" != X"" ]; then
-  DATA=`jq '.echo = true' <<< "$DATA"`
-fi
-
 if [ X"$STREAM" != X"" ]; then
   DATA=`jq '.stream = true' <<< "$DATA"`
+fi
+
+if [ X"$VERBOSE" != X"" ]; then
+  DATA=`jq '.verbose = true' <<< "$DATA"`
 fi
 
 if [ X"$ADDR" == X"" ]; then
@@ -190,7 +267,11 @@ if [ X"$APIKEY" != X"" ]; then
   HEADERS+=("-H" "Authorization: Bearer $APIKEY")
 fi
 
-echo curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
-curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
-
+# 执行curl命令
+if [ X"$NO_DEBUG" == X"" ]; then
+  echo curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
+  curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
+else
+  curl -s $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
+fi
 

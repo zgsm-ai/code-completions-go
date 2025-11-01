@@ -1,0 +1,12 @@
+.git
+.cospec
+.roo
+.vscode
+.gitignore
+bin
+tests
+README.md
+Dockerfile
+.dockerignore
+**/*.test
+**/tmp

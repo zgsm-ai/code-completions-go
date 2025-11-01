@@ -33,11 +33,9 @@ def get_go_env_vars():
     # Set environment variables based on current platform
     current_system = platform.system().lower()
     if current_system == "windows":
-        flags = 'set CGO_LDFLAGS="-L./bin/library/libtokenizers"&&'
-        flags += "set GOOS={0}&&set GOARCH={1}&&set CGO_ENABLED={2}&&".format(go_os, go_arch, opt_cgo_enabled)
+        flags = "set GOOS={0}&&set GOARCH={1}&&set CGO_ENABLED={2}&&".format(go_os, go_arch, opt_cgo_enabled)
     else:
-        flags = 'CGO_LDFLAGS="-L./bin/library/libtokenizers" '
-        flags += "GOOS={0} GOARCH={1} CGO_ENABLED={2}".format(go_os, go_arch, opt_cgo_enabled)
+        flags = "GOOS={0} GOARCH={1} CGO_ENABLED={2}".format(go_os, go_arch, opt_cgo_enabled)
     return flags
 
 # Get last tag.

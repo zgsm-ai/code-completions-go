@@ -1,11 +1,39 @@
 package model
 
-//
+//	前置模块处理完毕后给到模型进行调用的参数信息
+type CompletionParameter struct {
+	CompletionID string   `json:"completionID"`
+	ClientID     string   `json:"clientID"`
+	Model        string   `json:"model"`
+	MaxTokens    int      `json:"max_tokens"`
+	Temperature  float32  `json:"temperature"`
+	Stop         []string `json:"stop"`
+	Prefix       string   `json:"prefix"`
+	Suffix       string   `json:"suffix"`
+	CodeContext  string   `json:"context"`
+}
+
+type CompletionVerbose struct {
+	Input  map[string]interface{} `json:"input"`
+	Output map[string]interface{} `json:"output,omitempty"`
+}
+
+type CompletionStatus string
+
+const (
+	CompletionSuccess     CompletionStatus = "success"     //补全成功
+	CompletionReqError    CompletionStatus = "reqError"    //请求存在错误
+	CompletionServerError CompletionStatus = "serverError" //服务端错误
+	CompletionModelError  CompletionStatus = "modelError"  //模型响应错误
+	CompletionEmpty       CompletionStatus = "empty"       //补全结果为空
+	CompletionRejected    CompletionStatus = "rejected"    //根据规则拒绝补全
+	CompletionTimeout     CompletionStatus = "timeout"     //补全请求超时
+	CompletionCanceled    CompletionStatus = "canceled"    //用户取消
+)
+
 //	OpenAI v1/completions协议的请求和响应结构定义
 //
-//
 // 请求体结构(参考：https://api-docs.deepseek.com/zh-cn/api/create-completion)
-//
 type CompletionRequest struct {
 	Model            string   `json:"model"`
 	Prompt           string   `json:"prompt"`

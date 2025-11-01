@@ -208,54 +208,98 @@ func cutSuffixOverlap(text, prefix, suffix string, cutLine int, ignoreOverlapLen
 	return text
 }
 
-// 去除「补全内容」与prefix的后缀重叠部分
+// cutPrefixOverlap 去除「补全内容」与prefix的后缀重叠部分
+/**
+ * Remove overlapping content between completion text and prefix suffix
+ * @param {string} text - The completion text to be processed
+ * @param {string} prefix - The prefix text before cursor position
+ * @param {string} suffix - The suffix text after cursor position (not used in this function)
+ * @param {int} cutLine - Maximum number of lines to check for overlap
+ * @returns {string} Processed text with overlapping content removed
+ * @description
+ * - This function identifies and removes overlapping content between the completion text and the prefix
+ * - It uses a sliding window approach to compare lines from the end of prefix with lines from the beginning of completion text
+ * - If significant overlap is detected (3+ consecutive lines or 60%+ match ratio), the entire completion is discarded
+ * - For short completion texts (<3 lines), it uses a simpler check via judgePrefixFullLineRepetitive
+ * @example
+ * // If prefix ends with "function test() {" and completion starts with "function test() {",
+ * // the completion will be considered overlapping and removed
+ * processedText := cutPrefixOverlap(completion, prefix, suffix, 5)
+ */
 func cutPrefixOverlap(text, prefix, suffix string, cutLine int) string {
+	// Remove leading/trailing whitespace from completion text
 	stripText := strings.TrimSpace(text)
 	if len(stripText) == 0 {
 		return text
 	}
 
+	// Split completion text into lines
 	splitText := strings.Split(stripText, "\n")
+	// For short completion texts (<3 lines), use a simpler check
 	if len(splitText) < 3 {
+		// Check if completion text is completely repetitive with prefix's last line
 		if judgePrefixFullLineRepetitive(text, prefix) {
 			return ""
 		}
 		return text
 	}
 
+	// Clean and split prefix into lines
 	prefix = strings.TrimSpace(prefix)
 	splitPrefix := strings.Split(prefix, "\n")
 
+	// Determine the maximum number of lines to compare
 	matchLine := min(len(splitPrefix), len(splitText))
+	// Take only the first 'matchLine' lines from completion text for comparison
 	patternTextList := splitText[:matchLine]
 
+	// Iterate through different offset positions to find overlap
 	for i := 0; i < cutLine; i++ {
+		// Ensure i doesn't exceed splitPrefix length to avoid negative endIdx
+		if i >= len(splitPrefix) {
+			break
+		}
+
+		// Calculate start and end indices for the sliding window in prefix
+		// This creates a window that slides from the end of prefix backward
 		startIdx := len(splitPrefix) - matchLine - i
 		if startIdx < 0 {
 			startIdx = 0
 		}
 		endIdx := len(splitPrefix) - i
 
+		// Ensure startIdx <= endIdx to avoid invalid slicing
+		if startIdx > endIdx {
+			continue
+		}
+
+		// Extract the current window from prefix for comparison
 		curMatchTextList := splitPrefix[startIdx:endIdx]
 
+		// Count matching lines between prefix window and completion text
 		matchCount := 0
-		continueFlag := true
+		continueFlag := true // Tracks if we're still in a consecutive match sequence
 
+		// Compare each line in the windows
 		for j := 0; j < len(curMatchTextList) && j < len(patternTextList); j++ {
 			if strings.TrimSpace(curMatchTextList[j]) == strings.TrimSpace(patternTextList[j]) {
 				matchCount++
+				// If we find 3 consecutive matching lines, consider it significant overlap
 				if matchCount == 3 && continueFlag {
 					return ""
 				}
+				// If 60% or more lines match, also consider it significant overlap
 				if float64(matchCount)/float64(matchLine) >= 0.6 {
 					return ""
 				}
 			} else {
+				// Reset consecutive match flag when a mismatch is found
 				continueFlag = false
 			}
 		}
 	}
 
+	// If no significant overlap is found, return the original text
 	return text
 }
 

@@ -3,6 +3,7 @@ package completions
 import (
 	"code-completion/pkg/model"
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -18,97 +19,96 @@ type CompletionChoice struct {
 }
 
 type CompletionPerformance struct {
-	ReceiveTime      time.Time //收到请求的时间
-	StartTime        time.Time //排队完毕，开始处理的时间
-	ModelStartTime   time.Time //请求模型的开始时间
-	ModelEndTime     time.Time //请求模型的结束时间
-	FulledDuration   int
-	ModelDuration    int
-	PromptTokens     int
-	CompletionTokens int
+	ReceiveTime      time.Time     `json:"receive_time"`     //收到请求的时间
+	StartTime        time.Time     `json:"start_time"`       //排队完毕，开始(预)处理&获取上下文的时间
+	ModelStartTime   time.Time     `json:"model_start_time"` //请求模型的开始时间
+	ModelEndTime     time.Time     `json:"model_end_time"`   //请求模型的结束时间
+	QueueDuration    time.Duration `json:"queue_duration"`   //排队时间
+	ContextDuration  time.Duration `json:"context_duration"` //获取上下文的时间
+	LLMDuration      time.Duration `json:"llm_duration"`     //调用大语言模型耗用的时间
+	TotalDuration    time.Duration `json:"total_duration"`   //总时间
+	PromptTokens     int           `json:"prompt_tokens"`
+	CompletionTokens int           `json:"completion_tokens"`
+	TotalTokens      int           `json:"total_tokens"`
 }
 
-// CompletionResponse 补全响应结构
+// 补全响应结构
 type CompletionResponse struct {
-	ID      string                 `json:"id"`
-	Model   string                 `json:"model"`
-	Object  string                 `json:"object"`
-	Choices []CompletionChoice     `json:"choices"`
-	Created int                    `json:"created"`
-	Status  model.CompletionStatus `json:"status"`
-	Usage   CompletionUsage        `json:"usage"`
-	Origin  map[string]interface{} `json:"origin,omitempty"`
-	Prompt  string                 `json:"prompt"`
-
-	RequestTime      time.Time          `json:"request_time"`
-	ModelChoices     []CompletionChoice `json:"model_choices"`
-	ModelStartTime   *time.Time         `json:"model_start_time"` // may null
-	ModelEndTime     *time.Time         `json:"model_end_time"`
-	ModelCostTime    int                `json:"model_cost_time"` // ms
-	CompletionTokens int                `json:"completion_tokens"`
-	PromptTokens     int                `json:"prompt_tokens"`
+	ID      string                   `json:"id"`
+	Model   string                   `json:"model"`
+	Object  string                   `json:"object"`
+	Choices []CompletionChoice       `json:"choices"`
+	Created int                      `json:"created"`
+	Usage   CompletionPerformance    `json:"usage"`
+	Status  model.CompletionStatus   `json:"status"`
+	Error   string                   `json:"error"`
+	Verbose *model.CompletionVerbose `json:"verbose,omitempty"`
 }
 
-func ErrorResponse(req *CompletionRequest, ErrorCode model.CompletionStatus, perf *CompletionPerformance,
-	Prompt string, ModelChoices []CompletionChoice) *CompletionResponse {
+func ErrorResponse(req *CompletionRequest, status model.CompletionStatus,
+	perf *CompletionPerformance, verbose *model.CompletionVerbose, err error) *CompletionResponse {
+	if err == nil {
+		err = fmt.Errorf("%s", string(status))
+	}
 	return &CompletionResponse{
-		ID:               req.CompletionID,
-		Model:            req.Model,
-		Object:           "text_completion",
-		RequestTime:      perf.ReceiveTime, // 可以使用时间戳
-		Prompt:           Prompt,
-		PromptTokens:     perf.PromptTokens,
-		ModelStartTime:   &perf.ModelStartTime,
-		ModelEndTime:     &perf.ModelEndTime,
-		ModelCostTime:    perf.ModelDuration,
-		Choices:          []CompletionChoice{{Text: ""}}, // 使用后置处理后的补全结果
-		ModelChoices:     ModelChoices,
-		CompletionTokens: 0,
-		Status:           ErrorCode,
+		ID:      req.CompletionID,
+		Model:   req.Model,
+		Object:  "text_completion",
+		Choices: []CompletionChoice{{Text: ""}}, // 使用后置处理后的补全结果
+		Created: int(perf.ReceiveTime.Unix()),
+		Usage:   *perf,
+		Status:  status,
+		Error:   err.Error(),
+		Verbose: verbose,
 	}
 }
 
 func SuccessResponse(req *CompletionRequest, completionText string, perf *CompletionPerformance,
-	Prompt string, ModelChoices []CompletionChoice) *CompletionResponse {
+	verbose *model.CompletionVerbose) *CompletionResponse {
+	if !req.Verbose {
+		verbose = nil
+	}
 	return &CompletionResponse{
-		ID:               req.CompletionID,
-		Model:            req.Model,
-		Object:           "text_completion",
-		RequestTime:      perf.ReceiveTime, // 可以使用时间戳
-		Prompt:           Prompt,
-		PromptTokens:     perf.PromptTokens,
-		Choices:          []CompletionChoice{{Text: completionText}}, // 使用后置处理后的补全结果
-		ModelStartTime:   ModelStartTime,
-		ModelEndTime:     ModelEndTime,
-		ModelCostTime:    ModelCostTime,
-		ModelChoices:     ModelChoices,
-		CompletionTokens: 0,
-		Status:           model.CompletionSuccess,
+		ID:      req.CompletionID,
+		Model:   req.Model,
+		Object:  "text_completion",
+		Choices: []CompletionChoice{{Text: completionText}}, // 使用后置处理后的补全结果
+		Created: int(perf.ReceiveTime.Unix()),
+		Usage:   *perf,
+		Status:  model.CompletionSuccess,
+		Verbose: verbose,
 	}
 }
 
 // 取消请求
-func CancelRequest(req *CompletionRequest, err error) *CompletionResponse {
+func CancelRequest(req *CompletionRequest, perf *CompletionPerformance, err error) *CompletionResponse {
 	status := model.CompletionTimeout
 	if err.Error() == context.Canceled.Error() {
 		status = model.CompletionCanceled
 	}
+	perf.TotalDuration = time.Since(perf.ReceiveTime)
 	return &CompletionResponse{
 		ID:      req.CompletionID,
 		Model:   req.Model,
 		Object:  "text_completion",
 		Choices: []CompletionChoice{{Text: ""}},
+		Created: int(perf.ReceiveTime.Unix()),
+		Usage:   *perf,
 		Status:  status,
+		Error:   err.Error(),
 	}
 }
 
-func RejectRequest(req *CompletionRequest) *CompletionResponse {
+func RejectRequest(req *CompletionRequest, perf *CompletionPerformance, err error) *CompletionResponse {
+	perf.TotalDuration = time.Since(perf.ReceiveTime)
 	return &CompletionResponse{
 		ID:      req.CompletionID,
 		Model:   req.Model,
 		Object:  "text_completion",
 		Choices: []CompletionChoice{{Text: ""}},
+		Created: int(perf.ReceiveTime.Unix()),
+		Usage:   *perf,
 		Status:  model.CompletionRejected,
-		Created: int(time.Now().Local().Local().Unix()),
+		Error:   err.Error(),
 	}
 }

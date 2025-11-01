@@ -1,152 +1,193 @@
 package completions
 
 import (
-	"code-completion/pkg/model"
+	"code-completion/pkg/config"
+	"context"
+	"net/http"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
-// 准备prompt，处理前后缀长度并拼接
-func (h *CompletionHandler) preparePrompt(modelInfo *model.OpenAIModel, prefix, suffix, codeContext string) *PromptResult {
-	// 处理前缀和可选的代码上下文
-	newPrefix, newCodeContext := h.handlePrompt(prefix, true, codeContext, h.model.Config.MaxPrefixContext)
-	// 处理后缀
-	newSuffix, _ := h.handlePrompt(suffix, false, "", 0)
-
-	// 拼接prompt模板
-	prompt := h.getPromptTemplate(newPrefix, newSuffix, newCodeContext, &modelInfo.Config)
-
-	// 计算prompt的token数量
-	promptTokens := h.getTokensCount(prompt)
-
-	return &PromptResult{
-		Prompt:       prompt,
-		PromptTokens: promptTokens,
-		NewPrefix:    newPrefix,
-		NewSuffix:    newSuffix,
-	}
-}
-
-// 处理prompt截断逻辑
-func (h *CompletionHandler) handlePrompt(prompt string, isPrefix bool, optionalPrompt string, minPromptToken int) (string, string) {
-	if h.model.Tokenizer == nil {
-		return prompt, optionalPrompt
+/**
+ * 截断超长的提示词(前缀，后缀，上下文)
+ * 优先保留最靠近补全位置的代码
+ */
+func (h *CompletionHandler) truncatePrompt(cfg *config.ModelConfig, ppt *PromptOptions) {
+	tokenizer := h.llm.Tokenizer()
+	if tokenizer == nil {
+		return
 	}
 
-	// 获取token数量
-	promptTokens := h.model.Tokenizer.Encode(prompt, false)
-	requestedTokensNum := len(promptTokens)
+	prefixTokens := tokenizer.Encode(ppt.Prefix)
+	prefixTokensNum := len(prefixTokens)
 
-	var optionalTokensNum int
-	var optionalToken []uint32
-	if optionalPrompt != "" {
-		optionalToken = h.model.Tokenizer.Encode(optionalPrompt, false)
-		optionalTokensNum = len(optionalToken)
-	}
+	suffixTokens := tokenizer.Encode(ppt.Suffix)
+	suffixTokensNum := len(suffixTokens)
+
+	contextTokens := tokenizer.Encode(ppt.CodeContext)
+	contextTokensNum := len(contextTokens)
 
 	// 获取最大模型长度限制
-	var maxModelLen int
-	if isPrefix {
-		maxModelLen = h.model.Config.MaxPrefixContext
-	} else {
-		maxModelLen = h.model.Config.MaxSuffixContext
-	}
+	prefixMax := h.llm.Config().MaxPrefixContext
+	suffixMax := h.llm.Config().MaxSuffixContext
 
 	// 如果总token数超过限制，需要截断
-	if requestedTokensNum+optionalTokensNum > maxModelLen {
-		needCutTokens := requestedTokensNum + optionalTokensNum - maxModelLen
+	if prefixTokensNum+contextTokensNum > prefixMax {
+		needCutTokens := prefixTokensNum + contextTokensNum - prefixMax
 
-		var truncatedTokens []uint32
-		var truncatedOptionalTokens []uint32
-
-		// 前缀截断逻辑
-		if isPrefix {
-			if requestedTokensNum-needCutTokens >= minPromptToken {
-				// 直接截断prompt
-				truncatedTokens = promptTokens[needCutTokens:]
-			} else {
-				// 保留最小token数，然后截断optionalPrompt
-				actualMin := min(minPromptToken, requestedTokensNum)
-				truncatedTokens = promptTokens[requestedTokensNum-actualMin:]
-				if maxModelLen-actualMin > 0 && len(optionalToken) > maxModelLen-actualMin {
-					truncatedOptionalTokens = optionalToken[:maxModelLen-actualMin]
-				} else {
-					truncatedOptionalTokens = optionalToken
-				}
-			}
+		// 前缀都已经超长了，就把上下文完全丢弃掉
+		if prefixTokensNum >= prefixMax {
+			prefixTokens = prefixTokens[prefixTokensNum-prefixMax:]
+			ppt.CodeContext = ""
+			ppt.Prefix = tokenizer.Decode(prefixTokens)
+			ppt.Prefix = h.trimFirstLine(ppt.Prefix)
 		} else {
-			// 后缀截断逻辑
-			if requestedTokensNum > needCutTokens {
-				truncatedTokens = promptTokens[:requestedTokensNum-needCutTokens]
-			} else {
-				truncatedTokens = []uint32{}
-			}
+			contextTokens = contextTokens[needCutTokens:]
+			ppt.CodeContext = tokenizer.Decode(contextTokens)
 		}
-
-		// 将截断的tokens解码回字符串
-		if len(truncatedTokens) > 0 {
-			prompt = h.model.Tokenizer.Decode(truncatedTokens, false)
-		}
-
-		if len(truncatedOptionalTokens) > 0 {
-			optionalPrompt = h.model.Tokenizer.Decode(truncatedOptionalTokens, false)
-		}
-
-		// 保证切割处为完整行
-		prompt = h.ensureCompleteLines(prompt, isPrefix)
 	}
-
-	return prompt, optionalPrompt
+	if suffixTokensNum > suffixMax {
+		suffixTokens = suffixTokens[:suffixMax]
+		ppt.Suffix = tokenizer.Decode(suffixTokens)
+		ppt.Suffix = h.trimLastLine(ppt.Suffix)
+	}
 }
 
-// 确保切割处为完整行
-func (h *CompletionHandler) ensureCompleteLines(prompt string, isPrefix bool) string {
+func (h *CompletionHandler) trimFirstLine(prompt string) string {
 	lines := strings.SplitAfter(prompt, "\n")
 	if len(lines) > 0 {
-		if isPrefix {
-			// 前缀处理首行
-			if !strings.HasPrefix(lines[0], "\n") && !strings.HasPrefix(lines[0], "\r\n") {
-				lines = lines[1:]
-			}
-		} else {
-			// 后缀处理尾行
-			if len(lines) > 1 && !strings.HasSuffix(lines[len(lines)-1], "\n") {
-				lines = lines[:len(lines)-1]
-			}
+		if !strings.HasPrefix(lines[0], "\n") && !strings.HasPrefix(lines[0], "\r\n") {
+			lines = lines[1:]
 		}
 		return strings.Join(lines, "")
 	}
 	return prompt
 }
 
-// 判断是否为单行补全
-func (h *CompletionHandler) judgeSingleCompletion(linePrefix, lineSuffix, language string) bool {
-	// 简化的单行补全判断逻辑
-	// 可以根据实际需求扩展，参考Python代码中的CompletionLineHandler逻辑
-
-	// 如果光标前缀不为空且光标后缀为空，可能是单行补全
-	if linePrefix != "" && lineSuffix == "" {
-		return true
-	}
-
-	// 如果光标前缀以特定字符结尾，可能是单行补全
-	if strings.HasSuffix(linePrefix, ".") ||
-		strings.HasSuffix(linePrefix, " ") ||
-		strings.HasSuffix(linePrefix, "\t") {
-		return true
-	}
-
-	// 根据语言类型判断
-	switch strings.ToLower(language) {
-	case "python", "javascript", "typescript", "java", "c", "cpp":
-		// 对于这些语言，如果光标在行首，可能是单行补全
-		if strings.TrimSpace(linePrefix) == "" {
-			return true
+func (h *CompletionHandler) trimLastLine(suffix string) string {
+	lines := strings.SplitAfter(suffix, "\n")
+	if len(lines) > 0 {
+		if len(lines) > 1 && !strings.HasSuffix(lines[len(lines)-1], "\n") {
+			lines = lines[:len(lines)-1]
 		}
+		return strings.Join(lines, "")
 	}
-
-	return false
+	return suffix
 }
 
 func (h *CompletionHandler) getTokensCount(prompt string) int {
-	return h.model.Tokenizer.GetTokenCount(prompt)
+	return h.llm.Tokenizer().GetTokenCount(prompt)
+}
+
+/**
+ * 解析提示词
+ */
+func (h *CompletionHandler) parsePrompt(req *CompletionRequest) *PromptOptions {
+	var p PromptOptions
+	if req.PromptOptions != nil {
+		p = *req.PromptOptions
+	} else {
+		// 简单的提示词解析逻辑，参考Python代码
+		// 可以根据FIM_INDICATOR分割prompt来获取prefix和suffix
+		p.Prefix = req.Prompt
+	}
+
+	// 如果linePrefix为空，从prefix中提取
+	if p.CursorLinePrefix == "" && p.Prefix != "" {
+		lines := strings.Split(p.Prefix, "\n")
+		if len(lines) > 0 {
+			p.CursorLinePrefix = lines[len(lines)-1]
+		}
+	}
+
+	// 如果lineSuffix为空，从suffix中提取
+	if p.CursorLineSuffix == "" && p.Suffix != "" {
+		lines := strings.Split(p.Suffix, "\n")
+		if len(lines) > 0 {
+			p.CursorLineSuffix = lines[0]
+			if len(lines) > 1 {
+				p.CursorLineSuffix += "\n"
+			}
+		}
+	}
+
+	return &p
+}
+
+/**
+ * 获取加了FIM标记的prompt文本
+ */
+func (h *CompletionHandler) getFimPrompt(prefix, suffix, codeContext string, cfg *config.ModelConfig) string {
+	return cfg.FimBegin + codeContext + "\n" + prefix + cfg.FimHole + suffix + cfg.FimEnd
+}
+
+/**
+ * 准备停用词
+ */
+func (h *CompletionHandler) prepareStopWords(ppt *PromptOptions, req *CompletionRequest) []string {
+	var stopWords []string
+
+	// 添加请求中的停用词
+	if len(req.Stop) > 0 {
+		stopWords = append(stopWords, req.Stop...)
+	}
+
+	// 添加默认的FIM停用词
+	stopWords = append(stopWords, "<｜end▁of▁sentence｜>")
+
+	// 如果后缀为空，添加系统停用词
+	if ppt.Suffix == "" || strings.TrimSpace(ppt.Suffix) == "" {
+		stopWords = append(stopWords, "\n\n", "\n\n\n")
+	}
+
+	return stopWords
+}
+
+/**
+ * 获取上下文信息
+ */
+func (h *CompletionHandler) getContext(ctx context.Context, req *CompletionRequest,
+	prefix, suffix string, headers http.Header) string {
+	return h.contextClient.GetContext(
+		ctx,
+		req.ClientID,
+		req.ProjectPath,
+		req.FileProjectPath,
+		prefix,
+		suffix,
+		req.ImportContent,
+		headers,
+	)
+}
+
+/**
+ *	修剪补全结果
+ */
+func (h *CompletionHandler) pruneCompletionCode(completionText, prefix, suffix, lang string) string {
+	postprocessorContext := &PostprocessorContext{
+		Language:       lang,
+		CompletionCode: completionText,
+		Prefix:         prefix,
+		Suffix:         suffix,
+	}
+	var chain *PostprocessorChain
+	var err error
+	if len(h.cfg.CustomPruners) > 0 {
+		chain, err = NewPostprocessorChainByNames(h.cfg.CustomPruners)
+		if err != nil {
+			zap.L().Error("Invalid config: 'customPruners'",
+				zap.Any("customPruners", h.cfg.CustomPruners))
+		}
+	}
+	if chain == nil {
+		chain = NewDefaultPostprocessorChain()
+	}
+	if chain.Process(postprocessorContext) {
+		zap.L().Debug("Prune by Postprocessors",
+			zap.String("pre", completionText),
+			zap.String("post", postprocessorContext.CompletionCode),
+			zap.Any("hits", chain.GetHitProcessors()))
+	}
+	return postprocessorContext.CompletionCode
 }

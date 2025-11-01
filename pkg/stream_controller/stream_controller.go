@@ -48,22 +48,22 @@ func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, req *c
 	}
 
 	// 将请求添加到客户端队列，获取包含响应通道的ClientRequest
-	clientReq := sc.queues.AddRequest(req, ctx, headers)
-	defer sc.queues.RemoveRequest(clientReq)
+	creq := sc.queues.AddRequest(req, ctx, headers)
+	defer sc.queues.RemoveRequest(creq)
 
 	// 启动异步处理协程，选中等待队列的某个请求进行处理
 	go sc.scheduleRequest()
 
 	// 等待响应或错误
 	select {
-	case response := <-clientReq.ResponseChan:
-		return response
-	case <-clientReq.ctx.Done():
-		zap.L().Warn("ProcessCompletionRequest context canceled",
+	case rsp := <-creq.rspChan:
+		return rsp
+	case <-creq.ctx.Done():
+		zap.L().Debug("ProcessCompletionRequest context canceled",
 			zap.String("clientID", req.ClientID),
 			zap.String("completionID", req.CompletionID),
-			zap.Error(clientReq.ctx.Err()))
-		return completions.CancelRequest(clientReq.Request, clientReq.ctx.Err())
+			zap.Error(creq.ctx.Err()))
+		return completions.CancelRequest(creq.Request, &creq.Perf, creq.ctx.Err())
 	}
 }
 
@@ -76,18 +76,19 @@ func (sc *StreamController) scheduleRequest() error {
 	}
 
 	// 2. 将请求添加到模型请求池，执行模型调用
-	response := sc.pools.DoRequest(req)
+	rsp := sc.pools.WaitDoRequest(req)
 
 	// 3. 将模型的响应或错误发送到对应的通道
-	req.ResponseChan <- response
+	req.rspChan <- rsp
 	return nil
 }
 
 // 不使用流控的处理方式
 func (sc *StreamController) processWithoutStreamControl(ctx context.Context, req *completions.CompletionRequest, headers http.Header) *completions.CompletionResponse {
-	handler := completions.NewCompletionHandler()
+	pool := sc.pools.findIdlestPool(sc.pools.all)
+	handler := completions.NewCompletionHandler(pool.llm)
 	perf := &completions.CompletionPerformance{
-		ReceiveTime: time.Now(),
+		ReceiveTime: time.Now().Local(),
 	}
 	c := completions.NewCompletionContext(ctx, perf)
 	return handler.HandleCompletion(c, req, headers)

@@ -12,19 +12,19 @@ import (
 	"go.uber.org/zap"
 )
 
-// RejectCodeEnum 拒绝原因枚举
-type RejectCodeEnum string
+// 拒绝原因枚举
+type RejectCode string
 
 const (
-	Accepted          RejectCodeEnum = "ACCEPTED"
-	LowHiddenScore    RejectCodeEnum = "LOW_HIDDEN_SCORE"
-	AuthFail          RejectCodeEnum = "AUTH_FAIL"
-	FeatureNotSupport RejectCodeEnum = "FEATURE_NOT_SUPPORT"
+	Accepted          RejectCode = "ACCEPTED"
+	LowHiddenScore    RejectCode = "LOW_HIDDEN_SCORE"
+	AuthFail          RejectCode = "AUTH_FAIL"
+	FeatureNotSupport RejectCode = "FEATURE_NOT_SUPPORT"
 )
 
 // 补全过滤器接口
-type CompletionFilter interface {
-	Judge(data *CompletionRequest) RejectCodeEnum
+type Filter interface {
+	Judge(data *CompletionRequest) RejectCode
 }
 
 // 语言特性过滤器
@@ -33,22 +33,42 @@ type LanguageFeatureFilter struct {
 }
 
 // 创建语言特性过滤器
-func NewLanguageFeatureFilter() *LanguageFeatureFilter {
-	thresholdScore := config.Config.CompletionsConfig.ThresholdScore
+func NewLanguageFeatureFilter(cfg *config.CompletionWrapperConfig) *LanguageFeatureFilter {
+	thresholdScore := cfg.ThresholdScore
 	if thresholdScore == 0 {
 		thresholdScore = 0.3
+	}
+	strPattern := cfg.StrPattern
+	if strPattern == "" {
+		strPattern = `import +.*|from +.*|from +.* import *.*`
+	}
+
+	treePattern := cfg.TreePattern
+	if treePattern == "" {
+		treePattern = `\(comment.*|\(string.*|\(set \(string.*|\(dictionary.*|\(integer.*|\(list.*|\(tuple.*`
+	}
+	lineCountThreshold := cfg.LineCountThreshold
+	if lineCountThreshold == 0 {
+		lineCountThreshold = 5
+	}
+
+	endTag := cfg.EndTag
+	if endTag == "" {
+		endTag = "('>',';','}',')')"
 	}
 
 	return &LanguageFeatureFilter{
 		codeFilters: NewCodeFilters(
 			thresholdScore,
-			config.Config.CompletionsConfig.StrPattern,
-			config.Config.CompletionsConfig.TreePattern,
+			lineCountThreshold,
+			strPattern,
+			treePattern,
+			endTag,
 		),
 	}
 }
 
-func (h *LanguageFeatureFilter) Judge(data *CompletionRequest) RejectCodeEnum {
+func (h *LanguageFeatureFilter) Judge(data *CompletionRequest) RejectCode {
 	// 跳过手动触发模式
 	if strings.ToUpper(data.TriggerMode) == "MANUAL" {
 		return Accepted
@@ -68,8 +88,8 @@ type HiddenScoreFilter struct {
 }
 
 // 创建隐藏分数过滤器
-func NewHiddenScoreFilter() *HiddenScoreFilter {
-	thresholdScore := config.Config.CompletionsConfig.ThresholdScore
+func NewHiddenScoreFilter(cfg *config.CompletionWrapperConfig) *HiddenScoreFilter {
+	thresholdScore := cfg.ThresholdScore
 	if thresholdScore == 0 {
 		thresholdScore = 0.3
 	}
@@ -79,7 +99,7 @@ func NewHiddenScoreFilter() *HiddenScoreFilter {
 	}
 }
 
-func (h *HiddenScoreFilter) Judge(data *CompletionRequest) RejectCodeEnum {
+func (h *HiddenScoreFilter) Judge(data *CompletionRequest) RejectCode {
 	// 跳过手动触发和继续补全模式
 	mode := strings.ToUpper(data.TriggerMode)
 	if mode == "MANUAL" || mode == "CONTINUE" {
@@ -119,31 +139,31 @@ func (h *HiddenScoreFilter) Judge(data *CompletionRequest) RejectCodeEnum {
 	return Accepted
 }
 
-// CompletionRejectRuleChain 补全拒绝规则链
-type CompletionRejectRuleChain struct {
-	rejectHandlers []CompletionFilter
+// 补全拒绝规则链
+type FilterChain struct {
+	filters []Filter
 }
 
-// NewCompletionRejectRuleChain 创建新的拒绝规则链
-func NewCompletionRejectRuleChain() *CompletionRejectRuleChain {
-	handlers := make([]CompletionFilter, 0)
+// 创建新的拒绝规则链
+func NewFilterChain(cfg *config.CompletionWrapperConfig) *FilterChain {
+	handlers := make([]Filter, 0)
 
-	if !config.Config.CompletionsConfig.DisableScore {
-		handlers = append(handlers, NewHiddenScoreFilter())
+	if !cfg.DisableScore {
+		handlers = append(handlers, NewHiddenScoreFilter(cfg))
 	}
 
-	if !config.Config.CompletionsConfig.DisableLanguageFeature {
-		handlers = append(handlers, NewLanguageFeatureFilter())
+	if !cfg.DisableLanguageFeature {
+		handlers = append(handlers, NewLanguageFeatureFilter(cfg))
 	}
 
-	return &CompletionRejectRuleChain{
-		rejectHandlers: handlers,
+	return &FilterChain{
+		filters: handlers,
 	}
 }
 
 // Handle 处理补全请求，只要命中一个规则就拒绝补全
-func (c *CompletionRejectRuleChain) Handle(data *CompletionRequest) error {
-	for _, handler := range c.rejectHandlers {
+func (c *FilterChain) Handle(data *CompletionRequest) error {
+	for _, handler := range c.filters {
 		if rejectCode := handler.Judge(data); rejectCode != Accepted {
 			return fmt.Errorf("%s", rejectCode)
 		}
@@ -161,31 +181,8 @@ type CodeFilters struct {
 	LineCountThreshold int
 }
 
-// NewCodeFilters 创建代码过滤器
-func NewCodeFilters(thresholdScore float64, strPattern string, treePattern string) *CodeFilters {
-	if strPattern == "" {
-		strPattern = config.Config.CompletionsConfig.StrPattern
-		if strPattern == "" {
-			strPattern = `import +.*|from +.*|from +.* import *.*`
-		}
-	}
-	if treePattern == "" {
-		treePattern = config.Config.CompletionsConfig.TreePattern
-		if treePattern == "" {
-			treePattern = `\(comment.*|\(string.*|\(set \(string.*|\(dictionary.*|\(integer.*|\(list.*|\(tuple.*`
-		}
-	}
-
-	lineCountThreshold := config.Config.CompletionsConfig.LineCountThreshold
-	if lineCountThreshold == 0 {
-		lineCountThreshold = 5
-	}
-
-	endTag := config.Config.CompletionsConfig.EndTag
-	if endTag == "" {
-		endTag = "('>',';','}',')')"
-	}
-
+// 创建代码过滤器
+func NewCodeFilters(thresholdScore float64, lineCountThreshold int, strPattern, treePattern, endTag string) *CodeFilters {
 	return &CodeFilters{
 		ThresholdScore:     thresholdScore,
 		StrPattern:         strPattern,
@@ -478,6 +475,3 @@ func (h *HideScoreConfig) getLastLineLength(text string) int {
 	}
 	return len(lines[len(lines)-1])
 }
-
-// DefaultCompletionRejectRuleChain 默认的拒绝规则链实例
-var DefaultCompletionRejectRuleChain = NewCompletionRejectRuleChain()

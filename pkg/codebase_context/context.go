@@ -122,7 +122,6 @@ func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePa
 	case <-ctx.Done(): // 上下文取消，直接返回已收集的结果
 		zap.L().Warn("Context timeout, returning partial results", zap.Error(ctx.Err()))
 	}
-
 	return &SearchResult{
 		DefinitionResults: definitionResults,
 		SemanticResults:   semanticResults,
