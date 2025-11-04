@@ -33,6 +33,7 @@ echo "文件名,语言,响应时间(ms),状态,补全内容长度" > "$RESULT_FI
 
 # 定义测试文件数组
 declare -a test_files=(
+    "go0.go:go"
     "go1.go:go"
     "go2.go:go"
     "go3.go:go"
@@ -42,7 +43,7 @@ declare -a test_files=(
     "go7.go:go"
     "go8.go:go"
     "go9.go:go"
-    "go10.go:go"
+    "c0.c:c"
     "c1.c:c"
     "c2.c:c"
     "c3.c:c"
@@ -52,7 +53,6 @@ declare -a test_files=(
     "c7.c:c"
     "c8.c:c"
     "c9.c:c"
-    "c10.c:c"
     "cpp1.cpp:c++"
     "cpp2.cpp:c++"
     "cpp3.cpp:c++"
@@ -170,10 +170,10 @@ for file_info in "${test_files[@]}"; do
     response_file="$RESULTS_DIR/${filename%.*}.json"
 
     echo "[$current_test/$total_tests] 测试文件: ./data/$filename (语言: $language)"
-    echo  "  "./completion-extend.sh -n -v -f "data/$filename" -l $language -a "$COMPLETION_URL" -o "$response_file"
+    echo  "  "./completion-extend.sh -v -f "data/$filename" -l $language -a "$COMPLETION_URL" -o "$response_file"
     
     # 使用completion-extend.sh发送请求并保存响应
-    if ./completion-extend.sh -n -v -f "data/$filename" -l $language -a "$COMPLETION_URL" -o "$response_file"; then
+    if ./completion-extend.sh -v -f "data/$filename" -l $language -a "$COMPLETION_URL" -o "$response_file"; then
         # 记录结束时间
         end_time=$(date +%s%3N)
         response_time=$((end_time - start_time))

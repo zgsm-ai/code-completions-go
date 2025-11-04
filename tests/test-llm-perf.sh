@@ -83,6 +83,7 @@ echo "文件名,语言,响应时间(ms),状态,补全内容长度" > "$RESULT_FI
 
 # 定义测试文件数组
 declare -a test_files=(
+    "go0.go:go"
     "go1.go:go"
     "go2.go:go"
     "go3.go:go"
@@ -92,7 +93,7 @@ declare -a test_files=(
     "go7.go:go"
     "go8.go:go"
     "go9.go:go"
-    "go10.go:go"
+    "c0.c:c"
     "c1.c:c"
     "c2.c:c"
     "c3.c:c"
@@ -102,7 +103,6 @@ declare -a test_files=(
     "c7.c:c"
     "c8.c:c"
     "c9.c:c"
-    "c10.c:c"
     "cpp1.cpp:c++"
     "cpp2.cpp:c++"
     "cpp3.cpp:c++"
@@ -192,21 +192,17 @@ for file_info in "${test_files[@]}"; do
     fi
     
     current_test=$((current_test + 1))
-    echo "[$current_test/$total_tests] 测试文件: ./data/$filename (语言: $language)"
-    
     # 记录开始时间
     start_time=$(date +%s%3N)  # 毫秒级时间戳
-    
     # 执行补全请求_$(date +%Y%m%d_%H%M%S)
     response_file="$RESULTS_DIR/${filename%.*}.json"
-    
+    echo "[$current_test/$total_tests] 测试文件: ./data/$filename (语言: $language)"
+    echo "  "./completion-bare.sh -f "data/$filename" $KEY_OPT -m "$LLM_NAME" -a "$LLM_URL" -o "$response_file"
     # 使用completion-bare.sh发送请求并保存响应
-    if ./completion-bare.sh -n -f "data/$filename" $KEY_OPT -m "$LLM_NAME" -a "$LLM_URL" -o "$response_file"; then
+    if ./completion-bare.sh -f "data/$filename" $KEY_OPT -m "$LLM_NAME" -a "$LLM_URL" -o "$response_file"; then
         # 记录结束时间
         end_time=$(date +%s%3N)
         response_time=$((end_time - start_time))
-        
-        # 提取状态和补全内容长度
         status="成功"
         
         # 尝试从响应中提取补全内容长度
