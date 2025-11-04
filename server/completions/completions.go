@@ -24,16 +24,17 @@ import (
 // @Router /api/completions [post]
 // @Router /code-completion/api/v1/completions [post]
 func Completions(c *gin.Context) {
-	var req completions.CompletionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var req completions.CompletionInput
+	if err := c.ShouldBindJSON(&req.CompletionRequest); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	req.Headers = c.Request.Header
 
 	// 使用流控管理器处理请求
 	if stream_controller.Controller != nil {
-		rsp := stream_controller.Controller.ProcessCompletionRequest(c.Request.Context(), &req, c.Request.Header)
-		respCompletion(c, &req, rsp)
+		rsp := stream_controller.Controller.ProcessCompletionRequest(c.Request.Context(), &req)
+		respCompletion(c, &req.CompletionRequest, rsp)
 		return
 	}
 
@@ -43,8 +44,8 @@ func Completions(c *gin.Context) {
 		ReceiveTime: time.Now().Local(),
 	}
 	rc := completions.NewCompletionContext(c.Request.Context(), perf)
-	rsp := handler.HandleCompletion(rc, &req, c.Request.Header)
-	respCompletion(c, &req, rsp)
+	rsp := handler.HandleCompletion(rc, &req)
+	respCompletion(c, &req.CompletionRequest, rsp)
 }
 
 func respCompletion(c *gin.Context, req *completions.CompletionRequest, rsp *completions.CompletionResponse) {
@@ -59,18 +60,18 @@ func respCompletion(c *gin.Context, req *completions.CompletionRequest, rsp *com
 			zap.Any("response", rsp))
 	}
 	statusCode := http.StatusOK
-	switch rsp.Status {
-	case model.CompletionSuccess:
-		statusCode = http.StatusOK
-	case model.CompletionCanceled:
-		statusCode = http.StatusRequestTimeout
-	case model.CompletionTimeout:
-		statusCode = http.StatusGatewayTimeout
-	case model.CompletionReqError:
-	case model.CompletionRejected:
-		statusCode = http.StatusBadRequest
-	default:
-		statusCode = http.StatusInternalServerError
-	}
+	// switch rsp.Status {
+	// case model.CompletionSuccess:
+	// 	statusCode = http.StatusOK
+	// case model.CompletionCanceled:
+	// 	statusCode = http.StatusRequestTimeout
+	// case model.CompletionTimeout:
+	// 	statusCode = http.StatusGatewayTimeout
+	// case model.CompletionReqError:
+	// case model.CompletionRejected:
+	// 	statusCode = http.StatusBadRequest
+	// default:
+	// 	statusCode = http.StatusInternalServerError
+	// }
 	c.JSON(statusCode, rsp)
 }

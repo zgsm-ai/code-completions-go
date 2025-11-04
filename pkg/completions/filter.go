@@ -161,7 +161,7 @@ func NewFilterChain(cfg *config.CompletionWrapperConfig) *FilterChain {
 	}
 }
 
-// Handle 处理补全请求，只要命中一个规则就拒绝补全
+// 处理补全请求，只要命中一个规则就拒绝补全
 func (c *FilterChain) Handle(data *CompletionRequest) error {
 	for _, handler := range c.filters {
 		if rejectCode := handler.Judge(data); rejectCode != Accepted {

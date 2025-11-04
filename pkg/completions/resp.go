@@ -20,13 +20,11 @@ type CompletionChoice struct {
 
 type CompletionPerformance struct {
 	ReceiveTime      time.Time     `json:"receive_time"`     //收到请求的时间
-	StartTime        time.Time     `json:"start_time"`       //排队完毕，开始(预)处理&获取上下文的时间
-	ModelStartTime   time.Time     `json:"model_start_time"` //请求模型的开始时间
-	ModelEndTime     time.Time     `json:"model_end_time"`   //请求模型的结束时间
-	QueueDuration    time.Duration `json:"queue_duration"`   //排队时间
-	ContextDuration  time.Duration `json:"context_duration"` //获取上下文的时间
-	LLMDuration      time.Duration `json:"llm_duration"`     //调用大语言模型耗用的时间
-	TotalDuration    time.Duration `json:"total_duration"`   //总时间
+	EnqueueTime      time.Time     `json:"-"`                //开始排队时间
+	ContextDuration  time.Duration `json:"context_duration"` //获取上下文的时长
+	QueueDuration    time.Duration `json:"queue_duration"`   //排队时长
+	LLMDuration      time.Duration `json:"llm_duration"`     //调用大语言模型耗用的时长
+	TotalDuration    time.Duration `json:"total_duration"`   //总时长
 	PromptTokens     int           `json:"prompt_tokens"`
 	CompletionTokens int           `json:"completion_tokens"`
 	TotalTokens      int           `json:"total_tokens"`
@@ -100,7 +98,6 @@ func CancelRequest(req *CompletionRequest, perf *CompletionPerformance, err erro
 }
 
 func RejectRequest(req *CompletionRequest, perf *CompletionPerformance, err error) *CompletionResponse {
-	perf.TotalDuration = time.Since(perf.ReceiveTime)
 	return &CompletionResponse{
 		ID:      req.CompletionID,
 		Model:   req.Model,

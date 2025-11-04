@@ -2,8 +2,6 @@ package completions
 
 import (
 	"code-completion/pkg/config"
-	"context"
-	"net/http"
 	"strings"
 
 	"go.uber.org/zap"
@@ -81,41 +79,6 @@ func (h *CompletionHandler) getTokensCount(prompt string) int {
 }
 
 /**
- * 解析提示词
- */
-func (h *CompletionHandler) parsePrompt(req *CompletionRequest) *PromptOptions {
-	var p PromptOptions
-	if req.PromptOptions != nil {
-		p = *req.PromptOptions
-	} else {
-		// 简单的提示词解析逻辑，参考Python代码
-		// 可以根据FIM_INDICATOR分割prompt来获取prefix和suffix
-		p.Prefix = req.Prompt
-	}
-
-	// 如果linePrefix为空，从prefix中提取
-	if p.CursorLinePrefix == "" && p.Prefix != "" {
-		lines := strings.Split(p.Prefix, "\n")
-		if len(lines) > 0 {
-			p.CursorLinePrefix = lines[len(lines)-1]
-		}
-	}
-
-	// 如果lineSuffix为空，从suffix中提取
-	if p.CursorLineSuffix == "" && p.Suffix != "" {
-		lines := strings.Split(p.Suffix, "\n")
-		if len(lines) > 0 {
-			p.CursorLineSuffix = lines[0]
-			if len(lines) > 1 {
-				p.CursorLineSuffix += "\n"
-			}
-		}
-	}
-
-	return &p
-}
-
-/**
  * 获取加了FIM标记的prompt文本
  */
 func (h *CompletionHandler) getFimPrompt(prefix, suffix, codeContext string, cfg *config.ModelConfig) string {
@@ -125,40 +88,23 @@ func (h *CompletionHandler) getFimPrompt(prefix, suffix, codeContext string, cfg
 /**
  * 准备停用词
  */
-func (h *CompletionHandler) prepareStopWords(ppt *PromptOptions, req *CompletionRequest) []string {
+func (h *CompletionHandler) prepareStopWords(input *CompletionInput) []string {
 	var stopWords []string
 
 	// 添加请求中的停用词
-	if len(req.Stop) > 0 {
-		stopWords = append(stopWords, req.Stop...)
+	if len(input.Stop) > 0 {
+		stopWords = append(stopWords, input.Stop...)
 	}
 
 	// 添加默认的FIM停用词
 	stopWords = append(stopWords, "<｜end▁of▁sentence｜>")
 
 	// 如果后缀为空，添加系统停用词
-	if ppt.Suffix == "" || strings.TrimSpace(ppt.Suffix) == "" {
+	if input.PromptExt.Suffix == "" || strings.TrimSpace(input.PromptExt.Suffix) == "" {
 		stopWords = append(stopWords, "\n\n", "\n\n\n")
 	}
 
 	return stopWords
-}
-
-/**
- * 获取上下文信息
- */
-func (h *CompletionHandler) getContext(ctx context.Context, req *CompletionRequest,
-	prefix, suffix string, headers http.Header) string {
-	return h.contextClient.GetContext(
-		ctx,
-		req.ClientID,
-		req.ProjectPath,
-		req.FileProjectPath,
-		prefix,
-		suffix,
-		req.ImportContent,
-		headers,
-	)
 }
 
 /**

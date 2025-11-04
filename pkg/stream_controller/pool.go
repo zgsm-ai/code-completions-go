@@ -137,7 +137,7 @@ func (m *PoolManager) findIdlestPool(pools []*ModelPool) *ModelPool {
 func (m *PoolManager) WaitDoRequest(req *ClientRequest) *completions.CompletionResponse {
 	var pool *ModelPool
 
-	pools, exists := m.pools[req.Request.Model]
+	pools, exists := m.pools[req.Input.Model]
 	if !exists || len(pools) == 0 {
 		pool = m.findIdlestPool(m.all)
 	} else {
@@ -150,35 +150,37 @@ func (m *PoolManager) WaitDoRequest(req *ClientRequest) *completions.CompletionR
 		return m.doRequest(pool, req)
 	case <-req.ctx.Done(): // 请求被取消
 		zap.L().Debug("Request canceled, Semaphore wait timeout",
-			zap.String("model", req.Request.Model),
-			zap.String("clientID", req.Request.ClientID),
-			zap.String("completionID", req.Request.CompletionID),
+			zap.String("model", req.Input.Model),
+			zap.String("clientID", req.Input.ClientID),
+			zap.String("completionID", req.Input.CompletionID),
 			zap.Error(req.ctx.Err()))
-		return completions.CancelRequest(req.Request, &req.Perf, req.ctx.Err())
+		return completions.CancelRequest(&req.Input.CompletionRequest, &req.Perf, req.ctx.Err())
 	}
 }
 
 // 执行请求，调用补全模型
 func (m *PoolManager) doRequest(pool *ModelPool, req *ClientRequest) *completions.CompletionResponse {
+	req.Perf.QueueDuration = time.Since(req.Perf.EnqueueTime)
+
 	// 将请求添加到活跃请求列表
 	pool.mutex.Lock()
-	pool.requests[req.Request.CompletionID] = req
+	pool.requests[req.Input.CompletionID] = req
 	req.Pool = pool
 	pool.mutex.Unlock()
 
 	zap.L().Debug("Start processing model request",
 		zap.String("model", pool.cfg.ModelName),
-		zap.String("clientID", req.Request.ClientID),
-		zap.String("completionID", req.Request.CompletionID),
+		zap.String("clientID", req.Input.ClientID),
+		zap.String("completionID", req.Input.CompletionID),
 		zap.Int("requests", len(pool.requests)))
 
 	// 使用原有的补全处理器处理请求
 	handler := completions.NewCompletionHandler(pool.llm)
 	c := completions.NewCompletionContext(req.ctx, &req.Perf)
-	rsp := handler.HandleCompletion(c, req.Request, req.headers)
+	rsp := handler.CallLLM(c, req.Input)
 
 	pool.mutex.Lock()
-	delete(pool.requests, req.Request.CompletionID)
+	delete(pool.requests, req.Input.CompletionID)
 	req.Pool = nil
 	pool.mutex.Unlock()
 	select {
@@ -189,8 +191,8 @@ func (m *PoolManager) doRequest(pool *ModelPool, req *ClientRequest) *completion
 	}
 	zap.L().Debug("Completed processing model request",
 		zap.String("model", pool.cfg.ModelName),
-		zap.String("clientID", req.Request.ClientID),
-		zap.String("completionID", req.Request.CompletionID),
+		zap.String("clientID", req.Input.ClientID),
+		zap.String("completionID", req.Input.CompletionID),
 		zap.Duration("duration", time.Since(req.Perf.ReceiveTime)))
 	return rsp
 }

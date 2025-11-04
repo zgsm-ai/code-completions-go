@@ -3,7 +3,8 @@
 .roo
 .vscode
 .gitignore
-bin
+bin/cgtok
+bin/library
 tests
 README.md
 Dockerfile

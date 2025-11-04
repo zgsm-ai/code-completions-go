@@ -57,8 +57,8 @@ function print_help() {
   echo "  -t temperature: 温度值"
   echo "  -M max_tokens: 最大令牌数"
   echo "  -s suffix: 后缀"
-  echo "  -n: 仅输出curl获取的数据内容，不输出调试信息"
   echo "  -o output: 输出文件名"
+  echo "  -n: 仅输出curl获取的数据内容，不输出调试信息"
   echo "  -h: 帮助"
 }
 # 初始化选项
@@ -94,11 +94,11 @@ while getopts "a:p:d:f:F:k:m:s:t:M:hno:" opt; do
     s)
       SUFFIX="$OPTARG"
       ;;
-    n)
-      NO_DEBUG="true"
-      ;;
     o)
       OUTPUT="$OPTARG"
+      ;;
+    n)
+      NO_DEBUG="true"
       ;;
     h)
       print_help
@@ -112,16 +112,11 @@ while getopts "a:p:d:f:F:k:m:s:t:M:hno:" opt; do
   esac
 done
 
-# 如果指定了输出文件，则使用exec重定向整个脚本的输出
-if [ X"$OUTPUT" != X"" ]; then
-  exec > "$OUTPUT" 2>&1
-fi
-
 TEMP='{
   "model": "DeepSeek-Coder-V2-Lite-Base",
   "prompt": "#!/usr/bin/env python\n# coding: utf-8\nimport time\nimport base64\ndef trace(rsp):\n    print",
   "temperature": 0.1,
-  "max_tokens": 200,
+  "max_tokens": 50,
   "stop": [],
   "beta_mode": false,
   "suffix": null
@@ -172,13 +167,7 @@ if [ X"$APIKEY" != X"" ]; then
   HEADERS+=("-H" "Authorization: Bearer $APIKEY")
 fi
 
-if [ X"$NO_DEBUG" == X"true" ]; then
-  # 仅输出curl获取的数据内容，不包含HTTP头信息
-  curl -s $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
-else
-  # 输出调试信息和完整响应
-  echo curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
-  curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
+if [ X"$NO_DEBUG" == X"" ]; then
+  echo curl -o $OUTPUT -sS $ADDR "${HEADERS[@]}" -X POST -d "$DATA" 1>&2
 fi
-
-
+curl -o $OUTPUT -sS $ADDR "${HEADERS[@]}" -X POST -d "$DATA" 

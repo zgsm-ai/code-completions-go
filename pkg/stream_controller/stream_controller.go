@@ -5,7 +5,6 @@ import (
 	"code-completion/pkg/config"
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
 	"go.uber.org/zap"
@@ -42,16 +41,21 @@ func (sc *StreamController) Init() {
 }
 
 // 处理补全请求
-func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, req *completions.CompletionRequest, headers http.Header) *completions.CompletionResponse {
-	if req.ClientID == "" { // 如果无法获取客户端ID，使用默认处理方式
-		return sc.processWithoutStreamControl(ctx, req, headers)
+func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, input *completions.CompletionInput) *completions.CompletionResponse {
+	if input.ClientID == "" { // 如果无法获取客户端ID，使用默认处理方式
+		return sc.processWithoutStreamControl(ctx, input)
 	}
-
 	// 将请求添加到客户端队列，获取包含响应通道的ClientRequest
-	creq := sc.queues.AddRequest(req, ctx, headers)
+	creq := sc.queues.AddRequest(ctx, input)
 	defer sc.queues.RemoveRequest(creq)
 
-	// 启动异步处理协程，选中等待队列的某个请求进行处理
+	c := completions.NewCompletionContext(creq.ctx, &creq.Perf)
+	rsp := input.Preprocess(c)
+	if rsp != nil {
+		return rsp
+	}
+	creq.Perf.EnqueueTime = time.Now().Local()
+
 	go sc.scheduleRequest()
 
 	// 等待响应或错误
@@ -60,10 +64,10 @@ func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, req *c
 		return rsp
 	case <-creq.ctx.Done():
 		zap.L().Debug("ProcessCompletionRequest context canceled",
-			zap.String("clientID", req.ClientID),
-			zap.String("completionID", req.CompletionID),
+			zap.String("clientID", input.ClientID),
+			zap.String("completionID", input.CompletionID),
 			zap.Error(creq.ctx.Err()))
-		return completions.CancelRequest(creq.Request, &creq.Perf, creq.ctx.Err())
+		return completions.CancelRequest(&input.CompletionRequest, &creq.Perf, creq.ctx.Err())
 	}
 }
 
@@ -84,14 +88,14 @@ func (sc *StreamController) scheduleRequest() error {
 }
 
 // 不使用流控的处理方式
-func (sc *StreamController) processWithoutStreamControl(ctx context.Context, req *completions.CompletionRequest, headers http.Header) *completions.CompletionResponse {
+func (sc *StreamController) processWithoutStreamControl(ctx context.Context, input *completions.CompletionInput) *completions.CompletionResponse {
 	pool := sc.pools.findIdlestPool(sc.pools.all)
 	handler := completions.NewCompletionHandler(pool.llm)
 	perf := &completions.CompletionPerformance{
 		ReceiveTime: time.Now().Local(),
 	}
 	c := completions.NewCompletionContext(ctx, perf)
-	return handler.HandleCompletion(c, req, headers)
+	return handler.HandleCompletion(c, input)
 }
 
 // 启动定期维护的协程

@@ -15,7 +15,7 @@ if [ ! -f "./expose-completion.sh" ]; then
 fi
 
 # 补全服务的URL
-COMPLETION_URL="http://10.20.19.2:32088/code-completion/api/v1/completions"
+COMPLETION_URL=""
 
 # 如果存在./.env文件，则加载它
 if [ -f "./.env" ]; then
@@ -38,16 +38,31 @@ declare -a test_files=(
     "go3.go:go"
     "go4.go:go"
     "go5.go:go"
+    "go6.go:go"
+    "go7.go:go"
+    "go8.go:go"
+    "go9.go:go"
+    "go10.go:go"
     "c1.c:c"
     "c2.c:c"
     "c3.c:c"
     "c4.c:c"
     "c5.c:c"
+    "c6.c:c"
+    "c7.c:c"
+    "c8.c:c"
+    "c9.c:c"
+    "c10.c:c"
     "cpp1.cpp:c++"
     "cpp2.cpp:c++"
     "cpp3.cpp:c++"
     "cpp4.cpp:c++"
     "cpp5.cpp:c++"
+    "cpp6.cpp:c++"
+    "cpp7.cpp:c++"
+    "cpp8.cpp:c++"
+    "cpp9.cpp:c++"
+    "cpp10.cpp:c++"
     "10.py:python"
     "20.py:python"
     "30.py:python"
@@ -64,26 +79,51 @@ declare -a test_files=(
     "python4.py:python"
     "python5.py:python"
     "python6.py:python"
+    "python7.py:python"
+    "python8.py:python"
+    "python9.py:python"
+    "python10.py:python"
+    "python11.py:python"
     "java1.java:java"
     "java2.java:java"
     "java3.java:java"
     "java4.java:java"
     "java5.java:java"
+    "java6.java:java"
+    "java7.java:java"
+    "java8.java:java"
+    "java9.java:java"
+    "java10.java:java"
     "javascript1.js:javascript"
     "javascript2.js:javascript"
     "javascript3.js:javascript"
     "javascript4.js:javascript"
     "javascript5.js:javascript"
+    "javascript6.js:javascript"
+    "javascript7.js:javascript"
+    "javascript8.js:javascript"
+    "javascript9.js:javascript"
+    "javascript10.js:javascript"
     "typescript1.ts:typescript"
     "typescript2.ts:typescript"
     "typescript3.ts:typescript"
     "typescript4.ts:typescript"
     "typescript5.ts:typescript"
+    "typescript6.ts:typescript"
+    "typescript7.ts:typescript"
+    "typescript8.ts:typescript"
+    "typescript9.ts:typescript"
+    "typescript10.ts:typescript"
     "lua1.lua:lua"
     "lua2.lua:lua"
     "lua3.lua:lua"
     "lua4.lua:lua"
     "lua5.lua:lua"
+    "lua6.lua:lua"
+    "lua7.lua:lua"
+    "lua8.lua:lua"
+    "lua9.lua:lua"
+    "lua10.lua:lua"
 )
 
 # 检查 32088 端口是否已经被占用
@@ -124,13 +164,13 @@ for file_info in "${test_files[@]}"; do
     fi
     
     current_test=$((current_test + 1))
-    echo "[$current_test/$total_tests] 测试文件: ./data/$filename (语言: $language)"
-    
     # 记录开始时间
     start_time=$(date +%s%3N)  # 毫秒级时间戳
-    
     # 执行补全请求
     response_file="$RESULTS_DIR/${filename%.*}.json"
+
+    echo "[$current_test/$total_tests] 测试文件: ./data/$filename (语言: $language)"
+    echo  "  "./completion-extend.sh -n -v -f "data/$filename" -l $language -a "$COMPLETION_URL" -o "$response_file"
     
     # 使用completion-extend.sh发送请求并保存响应
     if ./completion-extend.sh -n -v -f "data/$filename" -l $language -a "$COMPLETION_URL" -o "$response_file"; then

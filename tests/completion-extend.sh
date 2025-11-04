@@ -1,6 +1,6 @@
 #!/bin/sh
 
-ADDR="http://10.20.19.2:32088/code-completion/api/v1/completions"
+ADDR=""
 DATA=""
 PROMPT=""
 DFILE=""
@@ -154,16 +154,11 @@ while getopts "a:p:d:f:F:k:m:i:c:P:C:l:t:M:r:o:nsvh" opt; do
   esac
 done
 
-# 如果指定了输出文件，则使用exec重定向整个脚本的输出
-if [ X"$OUTPUT" != X"" ]; then
-  exec > "$OUTPUT" 2>&1
-fi
-
 TEMP='{
   "model": "DeepSeek-Coder-V2-Lite-Base",
   "prompt": "#!/usr/bin/env python\n# coding: utf-8\nimport time\nimport base64\ndef trace(rsp):\n    print",
   "temperature": 0.1,
-  "max_tokens": 200,
+  "max_tokens": 50,
   "stop": [],
   "beta_mode": false,
   "stream": false,
@@ -269,9 +264,6 @@ fi
 
 # 执行curl命令
 if [ X"$NO_DEBUG" == X"" ]; then
-  echo curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
-  curl -i $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
-else
-  curl -s $ADDR "${HEADERS[@]}" -X POST -d "$DATA"
+  echo curl -o $OUTPUT -sS $ADDR "${HEADERS[@]}" -X POST -d "$DATA" 1>&2
 fi
-
+curl -o $OUTPUT -sS $ADDR "${HEADERS[@]}" -X POST -d "$DATA"

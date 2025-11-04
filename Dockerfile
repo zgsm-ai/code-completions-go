@@ -19,5 +19,6 @@ ENV env prod
 ENV TZ Asia/Shanghai
 WORKDIR /app
 COPY --from=builder /app/code-completion /app/code-completion
+COPY --from=builder /app/bin/deepseek-tokenizer /app/bin/deepseek-tokenizer
 
 ENTRYPOINT ["/app/code-completion"]

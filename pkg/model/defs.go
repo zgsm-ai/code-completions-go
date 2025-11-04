@@ -14,8 +14,9 @@ type CompletionParameter struct {
 }
 
 type CompletionVerbose struct {
-	Input  map[string]interface{} `json:"input"`
-	Output map[string]interface{} `json:"output,omitempty"`
+	Provider string                 `json:"provider"`
+	Input    map[string]interface{} `json:"input"`
+	Output   map[string]interface{} `json:"output,omitempty"`
 }
 
 type CompletionStatus string

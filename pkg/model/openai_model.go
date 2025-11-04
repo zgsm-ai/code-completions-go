@@ -32,12 +32,23 @@ func (m *OpenAIModel) Tokenizer() *tokenizers.Tokenizer {
 	return m.tokenizer
 }
 
+/**
+ * 获取加了FIM标记的prompt文本
+ */
+func (m *OpenAIModel) getFimPrompt(prefix, suffix, codeContext string, cfg *config.ModelConfig) string {
+	return cfg.FimBegin + codeContext + "\n" + prefix + cfg.FimHole + suffix + cfg.FimEnd
+}
+
 func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (*CompletionResponse, *CompletionVerbose, CompletionStatus, error) {
 	var prefix string
-	if p.CodeContext != "" {
-		prefix = strings.Join([]string{p.CodeContext, p.Prefix}, "\n")
+	if m.cfg.FimMode {
+		prefix = m.getFimPrompt(p.Prefix, p.Suffix, p.CodeContext, m.cfg)
 	} else {
-		prefix = p.Prefix
+		if p.CodeContext != "" {
+			prefix = strings.Join([]string{p.CodeContext, p.Prefix}, "\n")
+		} else {
+			prefix = p.Prefix
+		}
 	}
 	maxTokens := min(p.MaxTokens, m.cfg.MaxOuputToken)
 	data := map[string]interface{}{
@@ -52,10 +63,11 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 		// "top_p":             1,
 		// "suffix": p.Suffix,
 	}
-	if p.Suffix != "" {
+	if !m.cfg.FimMode && p.Suffix != "" {
 		data["suffix"] = p.Suffix
 	}
 	var verbose CompletionVerbose
+	verbose.Provider = m.cfg.Provider
 	verbose.Input = data
 	// 将data转换为JSON
 	jsonData, err := json.Marshal(data)

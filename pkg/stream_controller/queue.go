@@ -4,7 +4,6 @@ import (
 	"code-completion/pkg/completions"
 	"code-completion/pkg/config"
 	"context"
-	"net/http"
 	"sync"
 	"time"
 
@@ -37,24 +36,23 @@ func NewQueueManager() *QueueManager {
 }
 
 // 添加请求到等待队列
-func (m *QueueManager) AddRequest(req *completions.CompletionRequest, ctx context.Context, headers http.Header) *ClientRequest {
+func (m *QueueManager) AddRequest(ctx context.Context, input *completions.CompletionInput) *ClientRequest {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	queue, exists := m.queues[req.ClientID]
+	queue, exists := m.queues[input.ClientID]
 	if !exists {
 		queue = &ClientQueue{
-			ClientID: req.ClientID,
+			ClientID: input.ClientID,
 		}
-		m.queues[req.ClientID] = queue
+		m.queues[input.ClientID] = queue
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, config.Config.StreamController.CompletionTimeout)
 	creq := &ClientRequest{
-		Request:  req,
+		Input:    input,
 		Canceled: false,
 		ctx:      reqCtx,
 		cancel:   cancel,
-		headers:  headers,
 		rspChan:  make(chan *completions.CompletionResponse, 1),
 	}
 	creq.Perf.ReceiveTime = time.Now().Local()
@@ -69,10 +67,10 @@ func (m *QueueManager) AddRequest(req *completions.CompletionRequest, ctx contex
 	queue.CurrentReq = creq
 
 	zap.L().Debug("Add request to queue",
-		zap.String("clientID", req.ClientID),
-		zap.String("completionID", req.CompletionID),
-		zap.Any("body", req),
-		zap.Any("headers", headers),
+		zap.String("clientID", input.ClientID),
+		zap.String("completionID", input.CompletionID),
+		zap.Any("body", &input.CompletionRequest),
+		zap.Any("headers", input.Headers),
 		zap.Time("receiveTime", creq.Perf.ReceiveTime),
 		zap.Int("queueSize", len(m.global.Requests)))
 	return creq
@@ -85,7 +83,7 @@ func (m *QueueManager) RemoveRequest(req *ClientRequest) {
 	// 从总队列中移除请求
 	m.global.RemoveRequest(req)
 
-	queue, exists := m.queues[req.Request.ClientID]
+	queue, exists := m.queues[req.Input.ClientID]
 	if !exists {
 		return
 	}
@@ -96,8 +94,8 @@ func (m *QueueManager) RemoveRequest(req *ClientRequest) {
 	}
 
 	zap.L().Debug("Remove request from queue",
-		zap.String("clientID", req.Request.ClientID),
-		zap.String("completionID", req.Request.CompletionID),
+		zap.String("clientID", req.Input.ClientID),
+		zap.String("completionID", req.Input.CompletionID),
 		zap.Duration("duration", time.Since(req.Perf.ReceiveTime)),
 		zap.Int("queueSize", len(m.global.Requests)))
 }
@@ -105,8 +103,8 @@ func (m *QueueManager) RemoveRequest(req *ClientRequest) {
 // 取消现有请求
 func (m *QueueManager) cancelExistingRequest(req *ClientRequest) {
 	zap.L().Debug("Cancel existing request",
-		zap.String("clientID", req.Request.ClientID),
-		zap.String("completionID", req.Request.CompletionID))
+		zap.String("clientID", req.Input.ClientID),
+		zap.String("completionID", req.Input.CompletionID))
 	// 这里可以添加更多的取消逻辑，比如通知模型池取消请求
 	if req.cancel != nil {
 		req.cancel()
