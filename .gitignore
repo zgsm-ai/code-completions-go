@@ -19,6 +19,7 @@ go.work
 
 # IDE specific files
 .idea/
+.cospec/
 .vscode/*
 !.vscode/launch.json
 *.swp
@@ -35,8 +36,6 @@ desktop.ini
 
 # Environment files
 .env
-.env.local
-.env.*.local
 
 # Build output
 dist/
@@ -46,7 +45,16 @@ build/
 *.tmp
 *.temp
 *.bak
+*.tar
 
 # Project specific
 old-completions/
 __debug_*
+
+build-upload.sh
+*.sh
+
+*.yaml
+!code-completion.template.yaml
+
+tests/.env*
