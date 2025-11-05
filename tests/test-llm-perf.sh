@@ -10,17 +10,19 @@ show_usage() {
     echo "  -u, --url URL      设置LLM服务URL (默认: https://oneapi.sangfor.com/v1/completions)"
     echo "  -k, --key KEY      设置LLM服务API密钥"
     echo "  -m, --model MODEL  设置LLM模型名称 (默认: qwen/qwen2.5-coder-7b-instruct)"
+    echo "  -f, --fim          启用FIM(Fill-In-Middle)模式"
     echo "  -h, --help         显示此帮助信息"
     echo ""
     echo "示例:"
     echo "  $0 -u https://api.example.com/v1/completions -k your-api-key -model gpt-4"
-    echo "  $0 --url https://api.example.com/v1/completions --key your-api-key --model gpt-4"
+    echo "  $0 --url https://api.example.com/v1/completions --key your-api-key --model gpt-4 --fim"
 }
 
 # 默认参数值
 LLM_URL=""
 LLM_KEY=""
 LLM_NAME=""
+USE_FIM=false
 
 # 如果存在./.env文件，则加载它
 if [ -f "./.env" ]; then
@@ -43,6 +45,10 @@ while [[ $# -gt 0 ]]; do
             LLM_NAME="$2"
             shift 2
             ;;
+        -f|--fim)
+            USE_FIM=true
+            shift
+            ;;
         -h|--help)
             show_usage
             exit 0
@@ -56,9 +62,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 KEY_OPT=""
+FIM_OPT=""
 # 检查必要参数
 if [ ! -z "$LLM_KEY" ]; then
     KEY_OPT="-k $LLM_KEY"
+fi
+
+# 设置FIM选项
+if [ "$USE_FIM" = true ]; then
+    FIM_OPT="-i"
 fi
 
 # 检查必要文件是否存在
@@ -71,6 +83,7 @@ echo "配置信息:"
 echo "  URL: $LLM_URL"
 echo "  模型: $LLM_NAME"
 echo "  API密钥: ${LLM_KEY:0:10}..."
+echo "  FIM模式: $USE_FIM"
 echo ""
 
 # 创建结果目录
@@ -197,9 +210,9 @@ for file_info in "${test_files[@]}"; do
     # 执行补全请求_$(date +%Y%m%d_%H%M%S)
     response_file="$RESULTS_DIR/${filename%.*}.json"
     echo "[$current_test/$total_tests] 测试文件: ./data/$filename (语言: $language)"
-    echo "  "./completion-bare.sh -f "data/$filename" $KEY_OPT -m "$LLM_NAME" -a "$LLM_URL" -o "$response_file"
+    echo "  "./completion-bare.sh -f "data/$filename" $KEY_OPT $FIM_OPT -m "$LLM_NAME" -a "$LLM_URL" -o "$response_file"
     # 使用completion-bare.sh发送请求并保存响应
-    if ./completion-bare.sh -f "data/$filename" $KEY_OPT -m "$LLM_NAME" -a "$LLM_URL" -o "$response_file"; then
+    if ./completion-bare.sh -f "data/$filename" $KEY_OPT $FIM_OPT -m "$LLM_NAME" -a "$LLM_URL" -o "$response_file"; then
         # 记录结束时间
         end_time=$(date +%s%3N)
         response_time=$((end_time - start_time))

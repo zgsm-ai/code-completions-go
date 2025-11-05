@@ -32,10 +32,10 @@ type PromptOptions struct {
 
 // 计算隐藏分数配置
 type CalculateHideScore struct {
-	IsWhitespaceAfterCursor bool   `json:"is_whitespace_after_cursor"`
-	Prefix                  string `json:"prefix,omitempty"`
-	DocumentLength          int    `json:"document_length"`
-	PromptEndPos            int    `json:"prompt_end_pos"`
-	PreviousLabel           int    `json:"previous_label"`
-	PreviousLabelTimestamp  int64  `json:"previous_label_timestamp"`
+	IsWhitespaceAfterCursor bool   `json:"is_whitespace_after_cursor"` //光标之后该行是否没有内容(空白除外)
+	Prefix                  string `json:"prefix,omitempty"`           //光标前的所有内容
+	DocumentLength          int    `json:"document_length"`            //文档长度
+	PromptEndPos            int    `json:"prompt_end_pos"`             //光标在文档中的偏移
+	PreviousLabel           int    `json:"previous_label"`             //上个请求是否被接受
+	PreviousLabelTimestamp  int64  `json:"previous_label_timestamp"`   //上个请求被接受的时间戳
 }

@@ -96,7 +96,7 @@ func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput
 	return SuccessResponse(&input.CompletionRequest, completionText, c.Perf, verbose)
 }
 
-// 处理补全请求
+// 完整处理补全请求
 func (h *CompletionHandler) HandleCompletion(c *CompletionContext, input *CompletionInput) *CompletionResponse {
 	rsp := input.Preprocess(c)
 	if rsp != nil {

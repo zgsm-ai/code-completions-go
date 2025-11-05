@@ -9,7 +9,7 @@ RUN go env -w CGO_ENABLED=1 && \
     go env -w GO111MODULE=on && \
     go env -w GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct
 
-ARG VERSION=v1.7.0
+ARG VERSION=v1.7.76
 RUN go build -ldflags="-s -w -X 'main.SoftwareVer=$VERSION'" -o code-completion *.go
 RUN chmod 755 code-completion
 

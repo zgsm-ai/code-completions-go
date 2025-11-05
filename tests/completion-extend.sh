@@ -253,7 +253,7 @@ if [ X"$VERBOSE" != X"" ]; then
 fi
 
 if [ X"$ADDR" == X"" ]; then
-  echo missing <addr>, such as: -a "http://172.16.0.4:5001/v1/completions"
+  echo missing '-a/--addr', such as: -a "http://172.16.0.4:5001/v1/completions"
   exit 1
 fi
 

@@ -12,6 +12,7 @@ MAX_TOKENS=""
 SUFFIX=""
 NO_DEBUG=""
 OUTPUT=""
+FIM=""
 
 # 解析FIM格式的文件
 function parse_fim_file() {
@@ -59,10 +60,11 @@ function print_help() {
   echo "  -s suffix: 后缀"
   echo "  -o output: 输出文件名"
   echo "  -n: 仅输出curl获取的数据内容，不输出调试信息"
+  echo "  -i: 启用FIM模式，将prefix和suffix组合为特定格式"
   echo "  -h: 帮助"
 }
 # 初始化选项
-while getopts "a:p:d:f:F:k:m:s:t:M:hno:" opt; do
+while getopts "a:p:d:f:F:k:m:s:t:M:o:hni" opt; do
   case "$opt" in
     a)
       ADDR="$OPTARG"
@@ -99,6 +101,9 @@ while getopts "a:p:d:f:F:k:m:s:t:M:hno:" opt; do
       ;;
     n)
       NO_DEBUG="true"
+      ;;
+    i)
+      FIM="true"
       ;;
     h)
       print_help
@@ -157,8 +162,26 @@ if [ X"$SUFFIX" != X"" ]; then
   DATA=`jq --arg newValue "$SUFFIX" '.suffix = $newValue' <<< "$DATA"`
 fi
 
+# 处理FIM模式
+if [ X"$FIM" == X"true" ]; then
+  # 获取当前的prompt和suffix值
+  CURRENT_PROMPT=$(echo "$DATA" | jq -r '.prompt')
+  CURRENT_SUFFIX=$(echo "$DATA" | jq -r '.suffix')
+  
+  # 如果suffix为null或空，设为空字符串
+  if [ "$CURRENT_SUFFIX" = "null" ] || [ -z "$CURRENT_SUFFIX" ]; then
+    CURRENT_SUFFIX=""
+  fi
+  
+  # 组合为FIM格式: <｜fim▁begin｜>prefix<｜fim▁hole｜>suffix<｜fim▁end｜>
+  FIM_PROMPT="<｜fim▁begin｜>${CURRENT_PROMPT}<｜fim▁hole｜>${CURRENT_SUFFIX}<｜fim▁end｜>"
+  
+  # 更新DATA中的prompt字段，并清空suffix字段
+  DATA=`jq --arg newValue "$FIM_PROMPT" '.prompt = $newValue | .suffix = null' <<< "$DATA"`
+fi
+
 if [ X"$ADDR" == X"" ]; then
-  echo missing <addr>, such as: -a "http://172.16.0.4:5001/v1/completions"
+  echo missing '-a/--addr', such as: -a "http://172.16.0.4:5001/v1/completions"
   exit 1
 fi
 
