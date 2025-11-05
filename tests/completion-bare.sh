@@ -190,7 +190,12 @@ if [ X"$APIKEY" != X"" ]; then
   HEADERS+=("-H" "Authorization: Bearer $APIKEY")
 fi
 
-if [ X"$NO_DEBUG" == X"" ]; then
-  echo curl -o $OUTPUT -sS $ADDR "${HEADERS[@]}" -X POST -d "$DATA" 1>&2
+OUTPUT_OPT=""
+if [ X"$OUTPUT" != X"" ]; then
+  OUTPUT_OPT="-o $OUTPUT"
 fi
-curl -o $OUTPUT -sS $ADDR "${HEADERS[@]}" -X POST -d "$DATA" 
+
+if [ X"$NO_DEBUG" == X"" ]; then
+  echo curl $OUTPUT_OPT -sS $ADDR "${HEADERS[@]}" -X POST -d "$DATA" 1>&2
+fi
+curl $OUTPUT_OPT -sS $ADDR "${HEADERS[@]}" -X POST -d "$DATA" 
