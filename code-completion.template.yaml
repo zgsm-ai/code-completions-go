@@ -20,6 +20,8 @@ data:
       totalTimeout: 2000ms
     models:
       - completionsUrl: "${{__env_profile.completions_url}}"
+        provider: deepseek
+        modelId: "default"
         modelName: "${{__env_profile.model_name}}"
         authorization: "${{__env_profile.model_authorization}}"
         tags: 

@@ -50,7 +50,7 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 			prefix = p.Prefix
 		}
 	}
-	maxTokens := min(p.MaxTokens, m.cfg.MaxOuputToken)
+	maxTokens := min(p.MaxTokens, m.cfg.MaxOutputToken)
 	data := map[string]interface{}{
 		"model":       m.cfg.ModelName,
 		"prompt":      prefix,
@@ -67,7 +67,7 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 		data["suffix"] = p.Suffix
 	}
 	var verbose CompletionVerbose
-	verbose.Provider = m.cfg.Provider
+	verbose.Id = m.cfg.ModelId
 	verbose.Input = data
 	// 将data转换为JSON
 	jsonData, err := json.Marshal(data)

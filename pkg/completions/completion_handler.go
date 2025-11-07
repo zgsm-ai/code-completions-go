@@ -56,7 +56,7 @@ func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput
 	para.Suffix = input.PromptExt.Suffix
 	para.CodeContext = input.PromptExt.CodeContext
 	para.Stop = stopWords
-	para.MaxTokens = h.cfg.MaxOuputToken
+	para.MaxTokens = h.cfg.MaxOutputToken
 	para.Temperature = float32(input.Temperature)
 
 	modelStartTime := time.Now().Local()

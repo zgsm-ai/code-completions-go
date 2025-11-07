@@ -12,14 +12,15 @@ import (
 
 type ModelConfig struct {
 	Provider         string        `json:"provider" yaml:"provider"`                 // 模型供应商，代表着具体的模型接口/类型
-	CompletionsUrl   string        `json:"completionsUrl" yaml:"completionsUrl"`     // 补全地址
+	ModelId          string        `json:"modelId" yaml:"modelId"`                   // 模型来源的唯一标识
 	ModelName        string        `json:"modelName" yaml:"modelName"`               // 真实的模型名称
+	CompletionsUrl   string        `json:"completionsUrl" yaml:"completionsUrl"`     // 补全地址
 	Tags             []string      `json:"tags" yaml:"tags"`                         // 模型标签，用户可以根据标签选择补全模型
 	Authorization    string        `json:"authorization" yaml:"authorization"`       // 认证信息
 	Timeout          time.Duration `json:"timeout" yaml:"timeout"`                   // 超时时间ms
 	MaxPrefixContext int           `json:"maxPrefixContext" yaml:"maxPrefixContext"` // 最大模型上下文长度:前缀
 	MaxSuffixContext int           `json:"maxSuffixContext" yaml:"maxSuffixContext"` // 最大模型上下文长度:后缀
-	MaxOuputToken    int           `json:"maxOutputToken" yaml:"maxOutputToken"`     // 最大输出token数
+	MaxOutputToken   int           `json:"maxOutputToken" yaml:"maxOutputToken"`     // 最大输出token数
 	FimMode          bool          `json:"fimMode" yaml:"fimMode"`                   // 填充FIM标记的模式
 	FimBegin         string        `json:"fimBegin" yaml:"fimBegin"`                 // 开始
 	FimEnd           string        `json:"fimEnd" yaml:"fimEnd"`                     // 结束

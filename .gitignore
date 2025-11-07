@@ -56,5 +56,7 @@ build-upload.sh
 
 *.yaml
 !code-completion.template.yaml
+!tests/gen-llm-reports.sh
+!tests/gen-completion-reports.sh
 
 tests/.env*
