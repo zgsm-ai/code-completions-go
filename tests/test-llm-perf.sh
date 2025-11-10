@@ -177,3 +177,5 @@ else
 fi
 
 echo "所有任务已完成。"
+cat $RESULTS_DIR/perf_summary.txt
+exit 0

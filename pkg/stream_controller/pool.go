@@ -4,6 +4,7 @@ import (
 	"code-completion/pkg/completions"
 	"code-completion/pkg/config"
 	"code-completion/pkg/model"
+	"fmt"
 	"sync"
 	"time"
 
@@ -144,7 +145,10 @@ func (m *PoolManager) WaitDoRequest(req *ClientRequest) *completions.CompletionR
 		pool = m.findIdlestPool(pools)
 	}
 
-	// 等待信号量（即有模型完成补全请求，可以执行新请求）或上下文取消
+	// 创建队列超时计时器
+	queueTimeout := time.After(config.Config.StreamController.QueueTimeout)
+
+	// 等待信号量（即有模型完成补全请求，可以执行新请求）、上下文取消或队列超时
 	select {
 	case <-pool.semaphore: // 获取到信号量，处理请求
 		return m.doRequest(pool, req)
@@ -155,6 +159,15 @@ func (m *PoolManager) WaitDoRequest(req *ClientRequest) *completions.CompletionR
 			zap.String("completionID", req.Input.CompletionID),
 			zap.Error(req.ctx.Err()))
 		return completions.CancelRequest(&req.Input.CompletionRequest, &req.Perf, req.ctx.Err())
+	case <-queueTimeout: // 队列等待超时
+		zap.L().Debug("Queue wait timeout",
+			zap.String("model", req.Input.Model),
+			zap.String("clientID", req.Input.ClientID),
+			zap.String("completionID", req.Input.CompletionID),
+			zap.Duration("queueTimeout", config.Config.StreamController.QueueTimeout))
+		req.Perf.QueueDuration = time.Since(req.Perf.EnqueueTime)
+		return completions.CancelRequest(&req.Input.CompletionRequest, &req.Perf,
+			fmt.Errorf("queue wait timeout after %v", config.Config.StreamController.QueueTimeout))
 	}
 }
 

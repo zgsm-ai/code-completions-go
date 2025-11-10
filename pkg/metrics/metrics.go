@@ -15,7 +15,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "completion_durations",
 			Help:    "Duration of each phase of completion requests in milliseconds",
-			Buckets: []float64{10, 50, 100, 150, 200, 300, 400, 500, 600, 800, 1000, 1500, 2000, 2500, 5000, 10000},
+			Buckets: []float64{50, 100, 150, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 2000, 2500, 5000},
 		},
 		[]string{"model", "status", "phase"},
 	)
@@ -79,15 +79,9 @@ func RecordCompletionDuration(model string, status Status, queue, context, llm, 
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
 
-	// if queue != 0 {
 	completionDurations.WithLabelValues(model, string(status), "queue").Observe(float64(queue.Milliseconds()))
-	// }
-	// if context != 0 {
 	completionDurations.WithLabelValues(model, string(status), "context").Observe(float64(context.Milliseconds()))
-	// }
-	// if llm != 0 {
 	completionDurations.WithLabelValues(model, string(status), "llm").Observe(float64(llm.Milliseconds()))
-	// }
 	completionDurations.WithLabelValues(model, string(status), "total").Observe(float64(total.Milliseconds()))
 }
 

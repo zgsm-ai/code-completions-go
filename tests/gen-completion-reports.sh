@@ -8,20 +8,23 @@
 show_usage() {
     echo "用法: $0 [选项]"
     echo "选项:"
-    echo "  -d, --data-dir DIR   指定数据目录 (默认: tests/data)"
-    echo "  -o, --output DIR    指定输出目录 (默认: completion_perf_日期时间)"
-    echo "  -r, --response-dir DIR  指定响应文件目录 (如果与输出目录不同)"
+    echo "  -d, --data-dir DIR   指定数据目录 (默认: data)"
+    echo "  -o, --output DIR    指定输出目录 (默认: 使用响应文件目录)"
+    echo "  -r, --response-dir DIR  指定响应文件目录 (必要参数)"
+    echo "  -j, --perf-json-file FILE  指定性能数据JSON文件路径"
     echo "  -h, --help          显示此帮助信息"
     echo ""
     echo "示例:"
-    echo "  $0 -d tests/data -o results"
-    echo "  $0 --data-dir ./data --output-dir reports --response-dir responses"
+    echo "  $0 -r responses"
+    echo "  $0 -d data -r responses -o results"
+    echo "  $0 -r responses -j perf_data.json"
 }
 
 # 默认参数值
-DATA_DIR="tests/data"
+DATA_DIR="data"
 OUTPUT_DIR=""
 RESPONSE_DIR=""
+PERF_JSON_FILE=""
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -38,6 +41,10 @@ while [[ $# -gt 0 ]]; do
             RESPONSE_DIR="$2"
             shift 2
             ;;
+        -j|--perf-json-file)
+            PERF_JSON_FILE="$2"
+            shift 2
+            ;;
         -h|--help)
             show_usage
             exit 0
@@ -50,58 +57,56 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# 检查jq命令是否存在
+if ! command -v jq >/dev/null 2>&1; then
+    echo "错误: jq命令不存在，此脚本需要jq来处理JSON数据"
+    echo "请安装jq后再运行此脚本"
+    echo "安装方法:"
+    echo "  Ubuntu/Debian: sudo apt-get install jq"
+    echo "  CentOS/RHEL: sudo yum install jq"
+    echo "  macOS: brew install jq"
+    echo "  Windows: 使用WSL或下载jq二进制文件"
+    exit 1
+fi
+
+# 检查响应文件目录是否存在
+if [ -z "$RESPONSE_DIR" ]; then
+    echo "错误: 必须指定响应文件目录"
+    show_usage
+    exit 1
+fi
+
+if [ ! -d "$RESPONSE_DIR" ]; then
+    echo "错误: 响应文件目录不存在: $RESPONSE_DIR"
+    exit 1
+fi
+
 # 检查数据目录是否存在
 if [ ! -d "$DATA_DIR" ]; then
     echo "错误: 数据目录不存在: $DATA_DIR"
     exit 1
 fi
 
-# 如果未指定输出目录，创建带时间戳的目录
+# 如果未指定输出目录，使用响应文件目录
 if [ -z "$OUTPUT_DIR" ]; then
-    OUTPUT_DIR="completion_perf_$(date +%Y%m%d_%H%M%S)"
+    OUTPUT_DIR="$RESPONSE_DIR"
+fi
+
+# 如果未指定JSON性能文件，使用响应文件目录下的perf_data.json
+if [ -z "$PERF_JSON_FILE" ]; then
+    PERF_JSON_FILE="$RESPONSE_DIR/perf_data.json"
 fi
 
 # 创建输出目录
 mkdir -p "$OUTPUT_DIR"
 
-# 如果未指定响应文件目录，使用输出目录
-if [ -z "$RESPONSE_DIR" ]; then
-    RESPONSE_DIR="$OUTPUT_DIR"
-fi
-
-# 函数：根据文件扩展名确定语言类型
-get_language_by_extension() {
-    local filename="$1"
-    local extension="${filename##*.}"
-    
-    case "$extension" in
-        "go") echo "go" ;;
-        "c") echo "c" ;;
-        "cpp"|"cc"|"cxx") echo "c++" ;;
-        "py") echo "python" ;;
-        "java") echo "java" ;;
-        "js") echo "javascript" ;;
-        "ts") echo "typescript" ;;
-        "lua") echo "lua" ;;
-        *) echo "unknown" ;;
-    esac
-}
 
 # 创建结果文件
 result_file="$OUTPUT_DIR/perf_results.csv"
-echo "文件名,语言,响应时间(ms),状态,补全内容长度,输入长度,输入Token,输出Token" > "$result_file"
+echo "filename,status,fulltime,prompt_tokens,completion_tokens,total_duration" > "$result_file"
 
 echo "处理测试结果..."
 processed=0
-
-# 初始化语言统计变量
-declare -A lang_count      # 各语言测试数量
-declare -A lang_success    # 各语言成功数量
-declare -A lang_time_sum   # 各语言响应时间总和
-declare -A lang_time_valid # 各语言有效响应时间计数
-declare -A lang_prompt_tokens    # 各语言输入Token总和
-declare -A lang_completion_tokens # 各语言输出Token总和
-declare -A languages_seen  # 记录已处理的语言
 
 # 总体统计变量
 total_count=0
@@ -111,6 +116,58 @@ total_time_valid=0
 total_prompt_tokens=0
 total_completion_tokens=0
 
+# 状态统计变量
+declare -A status_count
+declare -A status_time_sum
+declare -A status_time_valid
+declare -A status_prompt_tokens
+declare -A status_completion_tokens
+
+# 响应时间数组（用于计算P90和P99）
+declare -a response_times
+
+# 初始化所有可能的状态
+statuses=("success" "reqError" "serverError" "modelError" "empty" "rejected" "timeout" "canceled")
+for status in "${statuses[@]}"; do
+    status_count[$status]=0
+    status_time_sum[$status]=0
+    status_time_valid[$status]=0
+    status_prompt_tokens[$status]=0
+    status_completion_tokens[$status]=0
+done
+
+# 创建关联数组来存储从perf-json-file中获取的fulltime数据
+declare -A fulltime_data
+
+# 如果提供了JSON文件，读取fulltime数据
+if [ -n "$PERF_JSON_FILE" ] && [ -f "$PERF_JSON_FILE" ]; then
+    echo "读取JSON性能数据文件中的fulltime: $PERF_JSON_FILE"
+    
+    # 获取数组长度
+    total_files=$(jq '. | length' "$PERF_JSON_FILE" 2>/dev/null || echo "0")
+    
+    # 遍历JSON数组，存储filename和对应的fulltime
+    for ((i=0; i<total_files; i++)); do
+        filename=$(jq -r ".[$i].filename" "$PERF_JSON_FILE" 2>/dev/null || echo "unknown")
+        response_time=$(jq -r ".[$i].response_time_ms" "$PERF_JSON_FILE" 2>/dev/null || echo "N/A")
+        
+        # 处理fulltime值
+        if [ "$response_time" = "null" ] || [ -z "$response_time" ]; then
+            response_time="N/A"
+        fi
+        
+        # 存储到关联数组
+        fulltime_data["$filename"]="$response_time"
+    done
+    
+    echo "已从JSON文件读取 $total_files 个文件的fulltime数据"
+else
+    echo "未提供JSON性能数据文件或文件不存在: $PERF_JSON_FILE"
+fi
+
+# 使用响应文件目录方式处理数据
+echo "使用响应文件目录方式处理数据..."
+
 # 获取数据目录中的所有文件
 file_list=$(find "$DATA_DIR" -type f | sort)
 total_files=$(echo "$file_list" | wc -l)
@@ -119,151 +176,131 @@ for filepath in $file_list; do
     # 获取文件名（不包含路径）
     filename=$(basename "$filepath")
     
-    # 根据文件扩展名确定语言类型
-    language=$(get_language_by_extension "$filename")
-    
-    # 跳过未知文件类型
-    if [ "$language" = "unknown" ]; then
-        echo "跳过未知文件类型: $filename"
-        continue
-    fi
-    
-    # 记录已处理的语言
-    languages_seen["$language"]=1
-    
-    # 计算输入文件内容长度（字符数）
-    input_length=$(wc -c < "$filepath")
-    
     # 查找对应的响应文件
     response_file="$RESPONSE_DIR/${filename%.*}.json"
     
     processed=$((processed + 1))
-    echo "[$processed/$total_files] 处理文件: $filename (语言: $language)"
+    echo "[$processed/$total_files] 处理文件: $filename"
     
     # 初始化统计值
-    completion_length="0"
     prompt_tokens="N/A"
     completion_tokens="N/A"
-    response_time="N/A"
-    status="无响应文件"
+    total_duration="N/A"
+    status="N/A"
+    
+    # 从perf-json-file获取fulltime
+    fulltime="${fulltime_data[$filename]:-N/A}"
+    
+    # 增加总测试数量
+    total_count=$((total_count + 1))
     
     if [ -f "$response_file" ]; then
+        # 从响应文件中提取状态
+        status=$(jq -r '.status // "N/A"' "$response_file" 2>/dev/null)
+        
+        # 如果状态无效，设为unknown
+        if [ "$status" = "null" ] || [ -z "$status" ] || [ "$status" = "N/A" ]; then
+            status="unknown"
+        fi
+        
+        # 检查状态是否在已知列表中，如果不在则设为unknown
+        status_known=false
+        for known_status in "${statuses[@]}"; do
+            if [ "$status" = "$known_status" ]; then
+                status_known=true
+                break
+            fi
+        done
+        
+        if [ "$status_known" = false ]; then
+            status="unknown"
+        fi
+        
+        # 增加对应状态的计数
+        status_count[$status]=$((${status_count[$status]} + 1))
+        
         # 尝试从响应文件中提取信息
         if grep -q '"choices"' "$response_file"; then
-            # 如果是JSON响应，提取补全内容
-            completion_length=$(jq -r '.choices[0].text | length' "$response_file" 2>/dev/null || echo "0")
+            # 如果是成功状态，增加成功计数
+            if [ "$status" = "success" ]; then
+                total_success=$((total_success + 1))
+            fi
             
             # 从verbose.output.usage中提取token信息
             prompt_tokens=$(jq -r '.verbose.output.usage.prompt_tokens // "N/A"' "$response_file" 2>/dev/null)
             completion_tokens=$(jq -r '.verbose.output.usage.completion_tokens // "N/A"' "$response_file" 2>/dev/null)
             
-            # 从usage.total_duration中提取响应时间（单位是毫秒）
-            response_time=$(jq -r '.usage.total_duration // "N/A"' "$response_file" 2>/dev/null)
+            # 从usage.total_duration中提取总持续时间（单位是纳秒，需要转换为毫秒）
+            total_duration_ns=$(jq -r '.usage.total_duration // "N/A"' "$response_file" 2>/dev/null)
             
-            # 如果获取不到token信息，设置为N/A
-            if [ "$prompt_tokens" = "null" ] || [ -z "$prompt_tokens" ]; then
+            # 处理null值和单位转换
+            if [ "$total_duration_ns" = "null" ] || [ -z "$total_duration_ns" ] || [ "$total_duration_ns" = "N/A" ]; then
+                total_duration="N/A"
+            else
+                # 将纳秒转换为毫秒（除以1,000,000）
+                total_duration=$(echo "scale=2; $total_duration_ns / 1000000" | bc 2>/dev/null || echo "N/A")
+                # 累加有效响应时间（总体和状态特定）
+                total_time_sum=$(echo "$total_time_sum + $total_duration" | bc 2>/dev/null || echo "$total_time_sum")
+                status_time_sum[$status]=$(echo "${status_time_sum[$status]} + $total_duration" | bc 2>/dev/null || echo "${status_time_sum[$status]}")
+                total_time_valid=$((total_time_valid + 1))
+                status_time_valid[$status]=$((${status_time_valid[$status]} + 1))
+                
+                # 将响应时间添加到数组中，用于计算百分位数
+                response_times+=("$total_duration")
+            fi
+            
+            # 处理prompt_tokens的null值并累加（总体和状态特定）
+            if [ "$prompt_tokens" != "null" ] && [ -n "$prompt_tokens" ] && [ "$prompt_tokens" != "N/A" ]; then
+                total_prompt_tokens=$((total_prompt_tokens + prompt_tokens))
+                status_prompt_tokens[$status]=$((${status_prompt_tokens[$status]} + prompt_tokens))
+            else
                 prompt_tokens="N/A"
             fi
-            if [ "$completion_tokens" = "null" ] || [ -z "$completion_tokens" ]; then
+            
+            # 处理completion_tokens的null值并累加（总体和状态特定）
+            if [ "$completion_tokens" != "null" ] && [ -n "$completion_tokens" ] && [ "$completion_tokens" != "N/A" ]; then
+                total_completion_tokens=$((total_completion_tokens + completion_tokens))
+                status_completion_tokens[$status]=$((${status_completion_tokens[$status]} + completion_tokens))
+            else
                 completion_tokens="N/A"
             fi
-            if [ "$response_time" = "null" ] || [ -z "$response_time" ]; then
-                response_time="N/A"
-            fi
             
-            status="成功"
-            
-            echo "  文件: $filename, 状态: $status, 输入Token: $prompt_tokens, 输出Token: $completion_tokens"
+            echo "  文件: $filename, 状态: $status, fulltime: $fulltime, 输入Token: $prompt_tokens, 输出Token: $completion_tokens, 总持续时间: $total_duration"
         else
-            # 如果不是JSON响应，可能是错误信息
-            status="错误"
-            echo "  文件: $filename, 状态: 错误"
+            echo "  文件: $filename, 状态: $status, 响应文件格式错误"
         fi
-    fi
-    
-    # 更新语言统计
-    lang_count["$language"]=$((${lang_count["$language"]:-0} + 1))
-    total_count=$((total_count + 1))
-    
-    if [ "$status" = "成功" ]; then
-        lang_success["$language"]=$((${lang_success["$language"]:-0} + 1))
-        total_success=$((total_success + 1))
-        
-        # 更新响应时间统计
-        if [ "$response_time" != "N/A" ]; then
-            lang_time_sum["$language"]=$(echo "${lang_time_sum["$language"]:-0} + $response_time" | bc)
-            lang_time_valid["$language"]=$((${lang_time_valid["$language"]:-0} + 1))
-            total_time_sum=$(echo "$total_time_sum + $response_time" | bc)
-            total_time_valid=$((total_time_valid + 1))
-        fi
-        
-        # 更新Token统计
-        if [ "$prompt_tokens" != "N/A" ]; then
-            lang_prompt_tokens["$language"]=$(echo "${lang_prompt_tokens["$language"]:-0} + $prompt_tokens" | bc)
-            total_prompt_tokens=$(echo "$total_prompt_tokens + $prompt_tokens" | bc)
-        fi
-        
-        if [ "$completion_tokens" != "N/A" ]; then
-            lang_completion_tokens["$language"]=$(echo "${lang_completion_tokens["$language"]:-0} + $completion_tokens" | bc)
-            total_completion_tokens=$(echo "$total_completion_tokens + $completion_tokens" | bc)
-        fi
+    else
+        # 如果响应文件不存在，设为unknown状态
+        status="unknown"
+        status_count[$status]=$((${status_count[$status]} + 1))
+        echo "  文件: $filename, 状态: $status, 响应文件不存在"
     fi
     
     # 记录结果到CSV
-    echo "$filename,$language,$response_time,$status,$completion_length,$input_length,$prompt_tokens,$completion_tokens" >> "$result_file"
+    echo "$filename,$status,$fulltime,$prompt_tokens,$completion_tokens,$total_duration" >> "$result_file"
 done
 
-# 生成性能报告
-echo "生成性能报告..."
-report_file="$OUTPUT_DIR/perf_reports.txt"
+# 生成性能测试汇总报告
+echo "生成性能测试汇总报告..."
+summary_file="$OUTPUT_DIR/perf_summary.txt"
 
-echo "补全性能测试报告" > "$report_file"
-echo "测试时间: $(date)" >> "$report_file"
-echo "数据来源: $DATA_DIR" >> "$report_file"
-echo "响应文件目录: $RESPONSE_DIR" >> "$report_file"
-echo "测试文件数量: $processed" >> "$report_file"
-echo "" >> "$report_file"
+echo "代码补全性能测试汇总报告" > "$summary_file"
+echo "测试时间: $(date)" >> "$summary_file"
+echo "数据来源: $DATA_DIR" >> "$summary_file"
+echo "响应文件目录: $RESPONSE_DIR" >> "$summary_file"
+echo "测试文件数量: $processed" >> "$summary_file"
+echo "" >> "$summary_file"
 
-# 按语言统计（使用已收集的统计变量）
-echo "按语言统计:" >> "$report_file"
-for lang in "${!languages_seen[@]}"; do
-    echo "  $lang:" >> "$report_file"
-    l_count=${lang_count["$lang"]:-0}
-    if [ $l_count -gt 0 ]; then
-        l_success=${lang_success["$lang"]:-0}
-        l_time_valid=${lang_time_valid["$lang"]:-0}
-        l_time_sum=${lang_time_sum["$lang"]:-0}
-        l_prompt_tokens=${lang_prompt_tokens["$lang"]:-0}
-        l_completion_tokens=${lang_completion_tokens["$lang"]:-0}
-        
-        # 计算平均响应时间（只计算成功的）
-        if [ $l_time_valid -gt 0 ]; then
-            avg_time=$(echo "scale=2; $l_time_sum / $l_time_valid" | bc)
-        else
-            avg_time="0"
-        fi
-        
-        echo "    测试数量: $l_count" >> "$report_file"
-        echo "    成功数量: $l_success" >> "$report_file"
-        echo "    平均响应时间: ${avg_time}ms" >> "$report_file"
-        echo "    总输入Token: $l_prompt_tokens" >> "$report_file"
-        echo "    总输出Token: $l_completion_tokens" >> "$report_file"
-    else
-        echo "    无测试数据" >> "$report_file"
-    fi
-    echo "" >> "$report_file"
-done
-
-# 总体统计（使用已收集的总体变量）
-echo "总体统计:" >> "$report_file"
-echo "  总测试数量: $total_count" >> "$report_file"
-echo "  总成功数量: $total_success" >> "$report_file"
+# 总体统计
+echo "总体统计:" >> "$summary_file"
+echo "  总测试数量: $total_count" >> "$summary_file"
+echo "  总成功数量: $total_success" >> "$summary_file"
 
 if [ $total_count -gt 0 ]; then
     success_rate=$(echo "scale=2; $total_success * 100 / $total_count" | bc)
-    echo "  成功率: ${success_rate}%" >> "$report_file"
+    echo "  成功率: ${success_rate}%" >> "$summary_file"
 else
-    echo "  成功率: 0%" >> "$report_file"
+    echo "  成功率: 0%" >> "$summary_file"
 fi
 
 if [ $total_time_valid -gt 0 ]; then
@@ -272,10 +309,73 @@ else
     total_avg_time="0"
 fi
 
-echo "  平均响应时间: ${total_avg_time}ms" >> "$report_file"
-echo "  总输入Token: $total_prompt_tokens" >> "$report_file"
-echo "  总输出Token: $total_completion_tokens" >> "$report_file"
+echo "  平均响应时间: ${total_avg_time}ms" >> "$summary_file"
+
+# 计算并输出P90和P99百分位数
+if [ ${#response_times[@]} -gt 0 ]; then
+    # 使用sort命令对响应时间进行排序
+    IFS=$'\n' sorted_times=($(sort -n <<<"${response_times[*]}"))
+    unset IFS
+    
+    # 计算P90（90%的请求响应时间小于等于此值）
+    p90_index=$(echo "(${#sorted_times[@]} * 90) / 100" | bc)
+    if [ $p90_index -ge ${#sorted_times[@]} ]; then
+        p90_index=$((${#sorted_times[@]} - 1))
+    fi
+    p90_value=${sorted_times[$p90_index]}
+    
+    # 计算P99（99%的请求响应时间小于等于此值）
+    p99_index=$(echo "(${#sorted_times[@]} * 99) / 100" | bc)
+    if [ $p99_index -ge ${#sorted_times[@]} ]; then
+        p99_index=$((${#sorted_times[@]} - 1))
+    fi
+    p99_value=${sorted_times[$p99_index]}
+    
+    echo "  P90响应时间: ${p90_value}ms" >> "$summary_file"
+    echo "  P99响应时间: ${p99_value}ms" >> "$summary_file"
+else
+    echo "  P90响应时间: N/A" >> "$summary_file"
+    echo "  P99响应时间: N/A" >> "$summary_file"
+fi
+
+echo "  总输入Token: $total_prompt_tokens" >> "$summary_file"
+echo "  总输出Token: $total_completion_tokens" >> "$summary_file"
+echo "" >> "$summary_file"
+
+# 按状态统计
+echo "按状态统计:" >> "$summary_file"
+echo "" >> "$summary_file"
+
+# 输出每个状态的统计信息
+for status in "${statuses[@]}" "unknown"; do
+    count=${status_count[$status]}
+    
+    if [ -n "$count" ] && [ $count -gt 0 ]; then
+        # 计算占比
+        percentage=$(echo "scale=2; $count * 100 / $total_count" | bc)
+        
+        # 计算平均响应时间
+        valid_count=${status_time_valid[$status]}
+        if [ -n "$valid_count" ] && [ $valid_count -gt 0 ]; then
+            avg_time=$(echo "scale=2; ${status_time_sum[$status]} / $valid_count" | bc)
+        else
+            avg_time="0"
+        fi
+        
+        # 获取token总数
+        prompt_tokens_sum=${status_prompt_tokens[$status]}
+        completion_tokens_sum=${status_completion_tokens[$status]}
+        
+        # 输出状态统计信息（格式更易读）
+        echo "状态: $status" >> "$summary_file"
+        echo "  数量: $count (${percentage}%)" >> "$summary_file"
+        echo "  平均响应时间: ${avg_time}ms" >> "$summary_file"
+        echo "  输入Token总数: $prompt_tokens_sum" >> "$summary_file"
+        echo "  输出Token总数: $completion_tokens_sum" >> "$summary_file"
+        echo "" >> "$summary_file"
+    fi
+done
 
 echo "CSV结果文件已保存到: $result_file"
-echo "性能报告已保存到: $report_file"
+echo "性能测试汇总报告已保存到: $summary_file"
 echo "报告生成完成。"

@@ -50,6 +50,7 @@ type CodebaseContextConfig struct {
 type StreamControllerConfig struct {
 	MaintainInterval  time.Duration `json:"maintainInterval" yaml:"maintainInterval"`   // 定时维护的间隔
 	CompletionTimeout time.Duration `json:"completionTimeout" yaml:"completionTimeout"` // 一个补全请求的最大超时
+	QueueTimeout      time.Duration `json:"queueTimeout" yaml:"queueTimeout"`           // 排队超时
 }
 
 type CompletionWrapperConfig struct {
@@ -71,6 +72,15 @@ type Conf struct {
 
 var Config = &Conf{}
 
+func resetDefValues(c *Conf) {
+	if c.StreamController.QueueTimeout == 0 {
+		c.StreamController.QueueTimeout = 1000 * time.Millisecond
+	}
+	if c.StreamController.CompletionTimeout == 0 {
+		c.StreamController.CompletionTimeout = 4500 * time.Microsecond
+	}
+}
+
 func init() {
 	// 读取配置文件
 	configFile, err := os.ReadFile("config.yaml")
@@ -86,6 +96,7 @@ func init() {
 		fmt.Printf("解析配置文件失败: %v\n", err)
 		panic(err)
 	}
+	resetDefValues(Config)
 	data, _ := json.MarshalIndent(Config, "", "  ")
 	fmt.Printf("配置文件加载成功:\n%s\n", string(data))
 }

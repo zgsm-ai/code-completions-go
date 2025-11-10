@@ -6,6 +6,7 @@ import (
 
 	"code-completion/pkg/logger"
 	"code-completion/pkg/metrics"
+	"code-completion/pkg/stream_controller"
 	"code-completion/server/completions"
 
 	"github.com/gin-gonic/gin"
@@ -47,6 +48,7 @@ func SetupRouter() *gin.Engine {
 	// 补全接口 - 兼容旧版本路径
 	api.POST("/completions", completions.Completions)
 	api.POST("/logs", logHandler)
+	api.GET("/stats", statsHandler)
 
 	// 补全接口 - 新版本路径（与客户端脚本保持一致）
 	completionRouter := r.Group("/code-completion")
@@ -88,6 +90,17 @@ func exampleHandler(c *gin.Context) {
 		"data": gin.H{
 			"timestamp": time.Now().Unix(),
 		},
+	})
+}
+
+func statsHandler(c *gin.Context) {
+	if stream_controller.Controller == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "disabled"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "OK",
+		"data":    stream_controller.Controller.GetStats(),
 	})
 }
 

@@ -16,8 +16,8 @@ data:
       semanticScoreThreshold: 0.5
       relationLayer: 3
       relationIncludeContent: false
-      requestTimeout: 1000ms
-      totalTimeout: 2000ms
+      requestTimeout: 800ms
+      totalTimeout: 1000ms
     models:
       - completionsUrl: "${{__env_profile.completions_url}}"
         provider: deepseek
@@ -41,6 +41,7 @@ data:
     streamController:
       maintainInterval: 600s
       completionTimeout: 4500ms
+      queueTimeout: 1000ms
     completionsConfig:
       disableScore: true
       disableLanguageFeature: false
