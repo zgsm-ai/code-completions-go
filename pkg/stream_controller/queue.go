@@ -16,8 +16,8 @@ import (
 
 // 客户端
 type ClientQueue struct {
-	ClientID   string
-	CurrentReq *ClientRequest
+	ClientID string
+	Latest   *ClientRequest
 }
 
 // 等待队列管理器
@@ -60,11 +60,11 @@ func (m *QueueManager) AddRequest(ctx context.Context, input *completions.Comple
 	m.global.AddRequest(creq)
 
 	// 取消队列中所有现有请求
-	if queue.CurrentReq != nil {
-		m.cancelExistingRequest(queue.CurrentReq)
-		queue.CurrentReq = nil
+	if queue.Latest != nil {
+		m.cancelRequest(queue.Latest)
+		queue.Latest = nil
 	}
-	queue.CurrentReq = creq
+	queue.Latest = creq
 
 	zap.L().Debug("Add request to queue",
 		zap.String("clientID", input.ClientID),
@@ -89,8 +89,8 @@ func (m *QueueManager) RemoveRequest(req *ClientRequest) {
 	}
 
 	// 如果移除的是当前请求，清空当前请求
-	if queue.CurrentReq == req {
-		queue.CurrentReq = nil
+	if queue.Latest == req {
+		queue.Latest = nil
 	}
 
 	zap.L().Debug("Remove request from queue",
@@ -101,8 +101,8 @@ func (m *QueueManager) RemoveRequest(req *ClientRequest) {
 }
 
 // 取消现有请求
-func (m *QueueManager) cancelExistingRequest(req *ClientRequest) {
-	zap.L().Debug("Cancel existing request",
+func (m *QueueManager) cancelRequest(req *ClientRequest) {
+	zap.L().Debug("Cancel request",
 		zap.String("clientID", req.Input.ClientID),
 		zap.String("completionID", req.Input.CompletionID))
 	// 这里可以添加更多的取消逻辑，比如通知模型池取消请求
@@ -130,18 +130,12 @@ func (m *QueueManager) GetStats() map[string]interface{} {
 		"canceled_request": canceledCount,
 		"activate_request": len(m.global.Requests) - canceledCount,
 	}
-	// stats["total_queues"] = len(m.queues)
-	// stats["total_requests"] = len(m.global.Requests)
-	// stats["canceled_requests"] = canceledCount
-	// stats["active_requests"] = len(m.global.Requests) - canceledCount
-
 	queueDetails := make(map[string]interface{})
 	for clientID, queue := range m.queues {
 		queueDetails[clientID] = map[string]interface{}{
-			"activate": queue.CurrentReq != nil,
+			"activate": queue.Latest != nil,
 		}
 	}
-
 	stats["queues"] = queueDetails
 
 	return stats
@@ -163,4 +157,11 @@ func (m *QueueManager) FindEarliestRequest() *ClientRequest {
 	defer m.mutex.RUnlock()
 
 	return m.global.FindEarliestRequest()
+}
+
+// 获取 global 队列长度（用于并发连接总数指标）
+func (m *QueueManager) GetGlobalQueueLength() int {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return len(m.global.Requests)
 }

@@ -3,6 +3,7 @@ package stream_controller
 import (
 	"code-completion/pkg/completions"
 	"code-completion/pkg/config"
+	"code-completion/pkg/metrics"
 	"context"
 	"fmt"
 	"time"
@@ -47,7 +48,13 @@ func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, input 
 	}
 	// 将请求添加到客户端队列，获取包含响应通道的ClientRequest
 	creq := sc.queues.AddRequest(ctx, input)
-	defer sc.queues.RemoveRequest(creq)
+	// 更新并发连接总数指标
+	metrics.UpdateCompletionConcurrent(sc.queues.GetGlobalQueueLength())
+	defer func() {
+		sc.queues.RemoveRequest(creq)
+		// 更新并发连接总数指标
+		metrics.UpdateCompletionConcurrent(sc.queues.GetGlobalQueueLength())
+	}()
 
 	c := completions.NewCompletionContext(creq.ctx, &creq.Perf)
 	rsp := input.Preprocess(c)
@@ -106,6 +113,7 @@ func (sc *StreamController) StartMaintainRoutine(interval time.Duration) {
 
 		for range ticker.C {
 			sc.queues.Cleanup()
+			sc.updateMetrics()
 			zap.L().Info("StreamController maintain", zap.Any("stats", sc.GetStats()))
 		}
 	}()
@@ -119,4 +127,11 @@ func (sc *StreamController) GetStats() map[string]interface{} {
 	stats["queues"] = sc.queues.GetStats()
 	stats["pools"] = sc.pools.GetStats()
 	return stats
+}
+
+// 更新指标
+func (sc *StreamController) updateMetrics() {
+	// 更新并发连接总数指标
+	concurrentCount := sc.queues.GetGlobalQueueLength()
+	metrics.UpdateCompletionConcurrent(concurrentCount)
 }

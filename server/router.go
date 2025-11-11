@@ -132,7 +132,7 @@ func logHandler(c *gin.Context) {
 	})
 }
 
-// ginLogger gin日志中间件
+// gin日志中间件
 func ginLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -148,12 +148,9 @@ func ginLogger() gin.HandlerFunc {
 		statusCode := c.Writer.Status()
 		bodySize := c.Writer.Size()
 
-		zap.L().Debug("HTTP Request",
-			zap.Int("status", statusCode),
-			zap.String("method", method),
-			zap.String("path", path),
-			zap.String("ip", clientIP),
-			zap.Duration("latency", latency),
+		zap.L().Debug("HTTP Request", zap.Int("status", statusCode),
+			zap.String("method", method), zap.String("path", path),
+			zap.String("ip", clientIP), zap.Duration("latency", latency),
 			zap.Int("bodySize", bodySize),
 		)
 	}

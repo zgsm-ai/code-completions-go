@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"code-completion/pkg/config"
-	"code-completion/pkg/metrics"
 	"code-completion/pkg/model"
 )
 
@@ -67,7 +66,6 @@ func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput
 	if completionStatus != model.CompletionSuccess {
 		c.Perf.PromptTokens = h.getTokensCount(input.PromptExt.Prefix) + h.getTokensCount(input.PromptExt.CodeContext)
 		c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
-		h.Metrics(h.cfg.ModelName, metrics.Status(completionStatus), c.Perf)
 		return ErrorResponse(&input.CompletionRequest, completionStatus, c.Perf, verbose, err)
 	}
 
@@ -85,12 +83,8 @@ func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput
 	c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
 
 	if completionText == "" {
-		h.Metrics(h.cfg.ModelName, metrics.StatusEmpty, c.Perf)
 		return ErrorResponse(&input.CompletionRequest, model.CompletionEmpty, c.Perf, verbose, fmt.Errorf("empty"))
 	}
-
-	// 记录成功指标
-	h.Metrics(h.cfg.ModelName, metrics.StatusSuccess, c.Perf)
 
 	// 7. 构建响应
 	return SuccessResponse(&input.CompletionRequest, completionText, c.Perf, verbose)
@@ -104,12 +98,4 @@ func (h *CompletionHandler) HandleCompletion(c *CompletionContext, input *Comple
 	}
 
 	return h.CallLLM(c, input)
-}
-
-func (h *CompletionHandler) Metrics(modelName string, status metrics.Status, perf *CompletionPerformance) {
-	metrics.RecordCompletionDuration(modelName, status,
-		perf.QueueDuration, perf.ContextDuration, perf.LLMDuration, perf.TotalDuration)
-	metrics.IncrementCompletionRequests(modelName, status)
-	metrics.RecordCompletionTokens(modelName, metrics.TokenTypeInput, perf.PromptTokens)
-	metrics.RecordCompletionTokens(modelName, metrics.TokenTypeOutput, perf.CompletionTokens)
 }

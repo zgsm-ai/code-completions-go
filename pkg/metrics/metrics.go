@@ -25,7 +25,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "completion_tokens",
 			Help:    "Number of input/output tokens in completion requests",
-			Buckets: []float64{10, 50, 100, 300, 500, 1000, 2000, 3000, 4000, 5000, 10000, 50000},
+			Buckets: []float64{10, 20, 35, 50, 100, 200, 300, 500, 1000, 2000, 3000, 4000, 5000},
 		},
 		[]string{"model", "type"},
 	)
@@ -37,6 +37,23 @@ var (
 			Help: "Total number of completion requests",
 		},
 		[]string{"model", "status"},
+	)
+
+	// 瞬时值指标：当前各模型池并发的连接总数
+	completionConcurrent = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "completion_concurrent",
+			Help: "Current total number of concurrent connections across all model pools",
+		},
+	)
+
+	// 瞬时值指标：各模型池并发的连接数（带model标签）
+	completionConcurrentByModel = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "completion_concurrent_by_model",
+			Help: "Current number of concurrent connections per model pool",
+		},
+		[]string{"model"},
 	)
 
 	// 互斥锁，确保线程安全
@@ -52,7 +69,7 @@ const (
 	StatusReqError    Status = "reqError"
 	StatusServerError Status = "serverError"
 	StatusEmpty       Status = "empty"
-	StatusReject      Status = "rejected"
+	StatusRejected    Status = "rejected"
 	StatusTimeout     Status = "timeout"
 	StatusCanceled    Status = "canceled"
 )
@@ -99,6 +116,22 @@ func IncrementCompletionRequests(model string, status Status) {
 	defer metricsMutex.Unlock()
 
 	completionRequestsTotal.WithLabelValues(model, string(status)).Inc()
+}
+
+// 更新当前各模型池并发的连接总数
+func UpdateCompletionConcurrent(count int) {
+	metricsMutex.Lock()
+	defer metricsMutex.Unlock()
+
+	completionConcurrent.Set(float64(count))
+}
+
+// 更新指定模型池的并发连接数
+func UpdateCompletionConcurrentByModel(model string, count int) {
+	metricsMutex.Lock()
+	defer metricsMutex.Unlock()
+
+	completionConcurrentByModel.WithLabelValues(model).Set(float64(count))
 }
 
 // 返回Prometheus指标数据的HTTP处理器

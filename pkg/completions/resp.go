@@ -1,6 +1,7 @@
 package completions
 
 import (
+	"code-completion/pkg/metrics"
 	"code-completion/pkg/model"
 	"context"
 	"fmt"
@@ -43,11 +44,20 @@ type CompletionResponse struct {
 	Verbose *model.CompletionVerbose `json:"verbose,omitempty"`
 }
 
+func Metrics(modelName string, status metrics.Status, perf *CompletionPerformance) {
+	metrics.RecordCompletionDuration(modelName, status,
+		perf.QueueDuration, perf.ContextDuration, perf.LLMDuration, perf.TotalDuration)
+	metrics.IncrementCompletionRequests(modelName, status)
+	metrics.RecordCompletionTokens(modelName, metrics.TokenTypeInput, perf.PromptTokens)
+	metrics.RecordCompletionTokens(modelName, metrics.TokenTypeOutput, perf.CompletionTokens)
+}
+
 func ErrorResponse(req *CompletionRequest, status model.CompletionStatus,
 	perf *CompletionPerformance, verbose *model.CompletionVerbose, err error) *CompletionResponse {
 	if err == nil {
 		err = fmt.Errorf("%s", string(status))
 	}
+	Metrics(req.Model, metrics.Status(status), perf)
 	return &CompletionResponse{
 		ID:      req.CompletionID,
 		Model:   req.Model,
@@ -66,6 +76,7 @@ func SuccessResponse(req *CompletionRequest, completionText string, perf *Comple
 	if !req.Verbose {
 		verbose = nil
 	}
+	Metrics(req.Model, metrics.StatusSuccess, perf)
 	return &CompletionResponse{
 		ID:      req.CompletionID,
 		Model:   req.Model,
@@ -85,6 +96,7 @@ func CancelRequest(req *CompletionRequest, perf *CompletionPerformance, err erro
 		status = model.CompletionCanceled
 	}
 	perf.TotalDuration = time.Since(perf.ReceiveTime)
+	Metrics(req.Model, metrics.Status(status), perf)
 	return &CompletionResponse{
 		ID:      req.CompletionID,
 		Model:   req.Model,
@@ -98,6 +110,7 @@ func CancelRequest(req *CompletionRequest, perf *CompletionPerformance, err erro
 }
 
 func RejectRequest(req *CompletionRequest, perf *CompletionPerformance, err error) *CompletionResponse {
+	Metrics(req.Model, metrics.StatusRejected, perf)
 	return &CompletionResponse{
 		ID:      req.CompletionID,
 		Model:   req.Model,

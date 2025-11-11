@@ -3,6 +3,7 @@ package stream_controller
 import (
 	"code-completion/pkg/completions"
 	"code-completion/pkg/config"
+	"code-completion/pkg/metrics"
 	"code-completion/pkg/model"
 	"fmt"
 	"sync"
@@ -179,13 +180,17 @@ func (m *PoolManager) doRequest(pool *ModelPool, req *ClientRequest) *completion
 	pool.mutex.Lock()
 	pool.requests[req.Input.CompletionID] = req
 	req.Pool = pool
+	currentRequests := len(pool.requests)
 	pool.mutex.Unlock()
+
+	// 更新模型池并发连接数指标
+	metrics.UpdateCompletionConcurrentByModel(pool.cfg.ModelName, currentRequests)
 
 	zap.L().Debug("Start processing model request",
 		zap.String("model", pool.cfg.ModelName),
 		zap.String("clientID", req.Input.ClientID),
 		zap.String("completionID", req.Input.CompletionID),
-		zap.Int("requests", len(pool.requests)))
+		zap.Int("requests", currentRequests))
 
 	// 使用原有的补全处理器处理请求
 	handler := completions.NewCompletionHandler(pool.llm)
@@ -195,7 +200,12 @@ func (m *PoolManager) doRequest(pool *ModelPool, req *ClientRequest) *completion
 	pool.mutex.Lock()
 	delete(pool.requests, req.Input.CompletionID)
 	req.Pool = nil
+	currentRequests = len(pool.requests)
 	pool.mutex.Unlock()
+
+	// 更新模型池并发连接数指标
+	metrics.UpdateCompletionConcurrentByModel(pool.cfg.ModelName, currentRequests)
+
 	select {
 	case pool.semaphore <- struct{}{}: // 成功释放信号量，表示又有一个空位，可调度补全请求
 	default: // 信号量已满，不应该发生

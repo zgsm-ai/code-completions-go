@@ -3,7 +3,6 @@ package completions
 import (
 	"code-completion/pkg/codebase_context"
 	"code-completion/pkg/config"
-	"code-completion/pkg/metrics"
 	"net/http"
 	"strings"
 	"time"
@@ -23,10 +22,6 @@ func (in *CompletionInput) Preprocess(c *CompletionContext) *CompletionResponse 
 	err := NewFilterChain(&config.Config.CompletionsConfig).Handle(&in.CompletionRequest)
 	if err != nil {
 		c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
-		metrics.RecordCompletionDuration(in.Model, metrics.StatusReject,
-			c.Perf.QueueDuration, c.Perf.ContextDuration,
-			c.Perf.LLMDuration, c.Perf.TotalDuration)
-		metrics.IncrementCompletionRequests(in.Model, metrics.StatusReject)
 		return RejectRequest(&in.CompletionRequest, c.Perf, err)
 	}
 
