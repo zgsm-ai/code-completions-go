@@ -15,23 +15,23 @@ import (
 //
 
 // 客户端
-type ClientQueue struct {
-	ClientID string
-	Latest   *ClientRequest
+type CompletionClient struct {
+	ClientID   string
+	Latest     *ClientRequest
+	LatestTime time.Time
 }
 
 // 等待队列管理器
 type QueueManager struct {
-	queues map[string]*ClientQueue
-	global *GlobalQueue
-	mutex  sync.RWMutex
+	clients        map[string]*CompletionClient
+	activeRequests int // 活跃请求数量统计
+	mutex          sync.RWMutex
 }
 
 // 创建等待队列管理器
 func NewQueueManager() *QueueManager {
 	return &QueueManager{
-		queues: make(map[string]*ClientQueue),
-		global: NewGlobalQueue(),
+		clients: make(map[string]*CompletionClient),
 	}
 }
 
@@ -40,12 +40,12 @@ func (m *QueueManager) AddRequest(ctx context.Context, input *completions.Comple
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	queue, exists := m.queues[input.ClientID]
+	client, exists := m.clients[input.ClientID]
 	if !exists {
-		queue = &ClientQueue{
+		client = &CompletionClient{
 			ClientID: input.ClientID,
 		}
-		m.queues[input.ClientID] = queue
+		m.clients[input.ClientID] = client
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, config.Config.StreamController.CompletionTimeout)
 	creq := &ClientRequest{
@@ -57,14 +57,15 @@ func (m *QueueManager) AddRequest(ctx context.Context, input *completions.Comple
 	}
 	creq.Perf.ReceiveTime = time.Now().Local()
 
-	m.global.AddRequest(creq)
+	// 增加活跃请求计数
+	m.activeRequests++
 
 	// 取消队列中所有现有请求
-	if queue.Latest != nil {
-		m.cancelRequest(queue.Latest)
-		queue.Latest = nil
+	if client.Latest != nil {
+		m.cancelRequest(client.Latest)
+		client.Latest = nil
 	}
-	queue.Latest = creq
+	client.Latest = creq
 
 	zap.L().Debug("Add request to queue",
 		zap.String("clientID", input.ClientID),
@@ -72,7 +73,7 @@ func (m *QueueManager) AddRequest(ctx context.Context, input *completions.Comple
 		zap.Any("body", &input.CompletionRequest),
 		zap.Any("headers", input.Headers),
 		zap.Time("receiveTime", creq.Perf.ReceiveTime),
-		zap.Int("queueSize", len(m.global.Requests)))
+		zap.Int("activeRequests", m.activeRequests))
 	return creq
 }
 
@@ -80,10 +81,12 @@ func (m *QueueManager) RemoveRequest(req *ClientRequest) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// 从总队列中移除请求
-	m.global.RemoveRequest(req)
+	// 减少活跃请求计数
+	if m.activeRequests > 0 {
+		m.activeRequests--
+	}
 
-	queue, exists := m.queues[req.Input.ClientID]
+	queue, exists := m.clients[req.Input.ClientID]
 	if !exists {
 		return
 	}
@@ -97,7 +100,7 @@ func (m *QueueManager) RemoveRequest(req *ClientRequest) {
 		zap.String("clientID", req.Input.ClientID),
 		zap.String("completionID", req.Input.CompletionID),
 		zap.Duration("duration", time.Since(req.Perf.ReceiveTime)),
-		zap.Int("queueSize", len(m.global.Requests)))
+		zap.Int("activeRequests", m.activeRequests))
 }
 
 // 取消现有请求
@@ -117,26 +120,21 @@ func (m *QueueManager) GetStats() map[string]interface{} {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
-	canceledCount := 0
-	for _, req := range m.global.Requests {
-		if req.Canceled {
-			canceledCount++
+	activatedClient := 0
+	for _, client := range m.clients {
+		if client.Latest != nil {
+			activatedClient++
 		}
 	}
 	stats := make(map[string]interface{})
-	stats["stat"] = map[string]interface{}{
-		"total_queues":     len(m.queues),
-		"total_request":    len(m.global.Requests),
-		"canceled_request": canceledCount,
-		"activate_request": len(m.global.Requests) - canceledCount,
+	stats["requests"] = map[string]interface{}{
+		"total": m.activeRequests,
 	}
-	queueDetails := make(map[string]interface{})
-	for clientID, queue := range m.queues {
-		queueDetails[clientID] = map[string]interface{}{
-			"activate": queue.Latest != nil,
-		}
+	stats["clients"] = map[string]interface{}{
+		"activated": activatedClient,
+		"idled":     len(m.clients) - activatedClient,
+		"total":     len(m.clients),
 	}
-	stats["queues"] = queueDetails
 
 	return stats
 }
@@ -146,22 +144,26 @@ func (m *QueueManager) Cleanup() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// 清理总队列中的已取消请求
-	m.global.Cleanup()
-	// 这里可以添加清理逻辑，比如删除长时间没有活动的队列
-	// 暂时简单实现，可以后续扩展
+	// 清理长时间没有活动的客户端
+	for _, client := range m.clients {
+		if client.Latest == nil {
+			// 没有活跃请求的客户端可以考虑移除
+			// 这里可以根据实际需求添加更复杂的逻辑
+			// 例如：基于最后活动时间的老化机制
+		}
+	}
 }
 
-func (m *QueueManager) FindEarliestRequest() *ClientRequest {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+// func (m *QueueManager) FindEarliestRequest() *ClientRequest {
+// 	m.mutex.RLock()
+// 	defer m.mutex.RUnlock()
 
-	return m.global.FindEarliestRequest()
-}
+// 	return m.global.FindEarliestRequest()
+// }
 
-// 获取 global 队列长度（用于并发连接总数指标）
+// 获取活跃请求数量（用于并发连接总数指标）
 func (m *QueueManager) GetGlobalQueueLength() int {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	return len(m.global.Requests)
+	return m.activeRequests
 }

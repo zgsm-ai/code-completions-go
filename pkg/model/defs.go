@@ -41,11 +41,11 @@ type CompletionRequest struct {
 	MaxTokens        int      `json:"max_tokens,omitempty"`
 	Temperature      float32  `json:"temperature,omitempty"`
 	TopP             float32  `json:"top_p,omitempty"`
-	FrequencyPenalty float32  `json:"frequency_penalty,omitemtpy"`
-	PresencePenalty  float32  `json:"presence_penalty,omitemtpy"`
+	FrequencyPenalty float32  `json:"frequency_penalty,omitempty"`
+	PresencePenalty  float32  `json:"presence_penalty,omitempty"`
 	Stop             []string `json:"stop,omitempty"`
 	Stream           bool     `json:"stream,omitempty"`
-	Echo             bool     `json:"echo,omitemtpy"`
+	Echo             bool     `json:"echo,omitempty"`
 	Suffix           string   `json:"suffix,omitempty"`
 }
 

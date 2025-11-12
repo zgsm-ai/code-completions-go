@@ -12,17 +12,14 @@ import (
 	"go.uber.org/zap"
 )
 
-//
-//	每个模型建立一个请求池，管理正在调用该模型的补全请求
-//
-
+// 每个模型建立一个请求池，管理正在调用该模型的补全请求
 // 模型请求池
 type ModelPool struct {
-	llm       model.LLM
-	cfg       *config.ModelConfig
-	requests  map[string]*ClientRequest
-	mutex     sync.RWMutex
-	semaphore chan struct{}
+	llm          model.LLM
+	cfg          *config.ModelConfig
+	runningCount int // 活跃请求数量计数
+	mutex        sync.RWMutex
+	waits        chan *ClientRequest
 }
 
 // 模型请求池管理器
@@ -57,16 +54,16 @@ func (m *PoolManager) Init() {
 // initPool 初始化模型请求池
 func (m *PoolManager) initPool(model string, llm model.LLM, cfg *config.ModelConfig) *ModelPool {
 	pool := &ModelPool{
-		cfg:       cfg,
-		llm:       llm,
-		requests:  make(map[string]*ClientRequest),
-		semaphore: make(chan struct{}, cfg.MaxConcurrent),
+		cfg:          cfg,
+		llm:          llm,
+		runningCount: 0,
+		waits:        make(chan *ClientRequest, cfg.MaxConcurrent*2), // 缓冲区设为最大并发数的2倍
 	}
 	m.all = append(m.all, pool)
 
-	// 初始化信号量
+	// 启动MaxConcurrent个协程处理请求
 	for i := 0; i < cfg.MaxConcurrent; i++ {
-		pool.semaphore <- struct{}{}
+		go m.LoopDoRequest(pool)
 	}
 
 	// 将池添加到对应的模型名下
@@ -111,7 +108,7 @@ func (m *PoolManager) findIdlestPool(pools []*ModelPool) *ModelPool {
 
 	for _, pool := range pools {
 		pool.mutex.RLock()
-		activeRequests := len(pool.requests)
+		activeRequests := pool.runningCount
 		maxConcurrent := pool.cfg.MaxConcurrent
 		pool.mutex.RUnlock()
 
@@ -146,29 +143,61 @@ func (m *PoolManager) WaitDoRequest(req *ClientRequest) *completions.CompletionR
 		pool = m.findIdlestPool(pools)
 	}
 
-	// 创建队列超时计时器
-	queueTimeout := time.After(config.Config.StreamController.QueueTimeout)
-
-	// 等待信号量（即有模型完成补全请求，可以执行新请求）、上下文取消或队列超时
+	// 尝试将请求发送到ModelPool的waits通道，如果不能立即发送则失败
 	select {
-	case <-pool.semaphore: // 获取到信号量，处理请求
-		return m.doRequest(pool, req)
+	case pool.waits <- req: // 成功将请求发送到waits通道
+		// 等待请求处理完成
+		select {
+		case rsp := <-req.rspChan: // 接收处理结果
+			return rsp
+		case <-req.ctx.Done(): // 请求被取消
+			zap.L().Debug("Request canceled during processing",
+				zap.String("model", req.Input.Model),
+				zap.String("clientID", req.Input.ClientID),
+				zap.String("completionID", req.Input.CompletionID),
+				zap.Error(req.ctx.Err()))
+			req.Canceled = true
+			return completions.CancelRequest(&req.Input.CompletionRequest, &req.Perf, req.ctx.Err())
+		}
 	case <-req.ctx.Done(): // 请求被取消
-		zap.L().Debug("Request canceled, Semaphore wait timeout",
+		zap.L().Debug("Request canceled, failed to send to waits channel",
 			zap.String("model", req.Input.Model),
 			zap.String("clientID", req.Input.ClientID),
 			zap.String("completionID", req.Input.CompletionID),
 			zap.Error(req.ctx.Err()))
+		req.Canceled = true
 		return completions.CancelRequest(&req.Input.CompletionRequest, &req.Perf, req.ctx.Err())
-	case <-queueTimeout: // 队列等待超时
-		zap.L().Debug("Queue wait timeout",
+	default: // waits通道已满，无法立即发送请求
+		zap.L().Debug("Model pool busy, failed to send request",
 			zap.String("model", req.Input.Model),
 			zap.String("clientID", req.Input.ClientID),
-			zap.String("completionID", req.Input.CompletionID),
-			zap.Duration("queueTimeout", config.Config.StreamController.QueueTimeout))
+			zap.String("completionID", req.Input.CompletionID))
 		req.Perf.QueueDuration = time.Since(req.Perf.EnqueueTime)
+		req.Canceled = true
 		return completions.CancelRequest(&req.Input.CompletionRequest, &req.Perf,
-			fmt.Errorf("queue wait timeout after %v", config.Config.StreamController.QueueTimeout))
+			fmt.Errorf("model pool busy, request rejected"))
+	}
+}
+
+// LoopDoRequest 循环处理ModelPool的waits通道中的请求
+func (m *PoolManager) LoopDoRequest(pool *ModelPool) {
+	for {
+		// 从waits通道获取请求
+		req := <-pool.waits
+		if req == nil || req.Canceled {
+			continue
+		}
+
+		// 调用doRequest处理请求
+		rsp := m.doRequest(pool, req)
+
+		// 将结果发送回请求的响应通道
+		select {
+		case req.rspChan <- rsp:
+		default:
+			zap.L().Error("Failed to send response to client",
+				zap.String("completionID", req.Input.CompletionID))
+		}
 	}
 }
 
@@ -176,21 +205,14 @@ func (m *PoolManager) WaitDoRequest(req *ClientRequest) *completions.CompletionR
 func (m *PoolManager) doRequest(pool *ModelPool, req *ClientRequest) *completions.CompletionResponse {
 	req.Perf.QueueDuration = time.Since(req.Perf.EnqueueTime)
 
-	// 将请求添加到活跃请求列表
+	// 增加活跃请求计数
 	pool.mutex.Lock()
-	pool.requests[req.Input.CompletionID] = req
+	pool.runningCount++
 	req.Pool = pool
-	currentRequests := len(pool.requests)
+	currentRequests := pool.runningCount
 	pool.mutex.Unlock()
 
-	// 更新模型池并发连接数指标
 	metrics.UpdateCompletionConcurrentByModel(pool.cfg.ModelName, currentRequests)
-
-	zap.L().Debug("Start processing model request",
-		zap.String("model", pool.cfg.ModelName),
-		zap.String("clientID", req.Input.ClientID),
-		zap.String("completionID", req.Input.CompletionID),
-		zap.Int("requests", currentRequests))
 
 	// 使用原有的补全处理器处理请求
 	handler := completions.NewCompletionHandler(pool.llm)
@@ -198,25 +220,15 @@ func (m *PoolManager) doRequest(pool *ModelPool, req *ClientRequest) *completion
 	rsp := handler.CallLLM(c, req.Input)
 
 	pool.mutex.Lock()
-	delete(pool.requests, req.Input.CompletionID)
+	if pool.runningCount > 0 {
+		pool.runningCount--
+	}
 	req.Pool = nil
-	currentRequests = len(pool.requests)
+	currentRequests = pool.runningCount
 	pool.mutex.Unlock()
 
-	// 更新模型池并发连接数指标
 	metrics.UpdateCompletionConcurrentByModel(pool.cfg.ModelName, currentRequests)
 
-	select {
-	case pool.semaphore <- struct{}{}: // 成功释放信号量，表示又有一个空位，可调度补全请求
-	default: // 信号量已满，不应该发生
-		zap.L().Error("Semaphore release failed",
-			zap.String("model", pool.cfg.ModelName), zap.Int("semaphore", len(pool.semaphore)))
-	}
-	zap.L().Debug("Completed processing model request",
-		zap.String("model", pool.cfg.ModelName),
-		zap.String("clientID", req.Input.ClientID),
-		zap.String("completionID", req.Input.CompletionID),
-		zap.Duration("duration", time.Since(req.Perf.ReceiveTime)))
 	return rsp
 }
 
@@ -230,11 +242,11 @@ func (m *PoolManager) GetStats() map[string]interface{} {
 	for _, pool := range m.all {
 		pool.mutex.RLock()
 		poolInfo := map[string]interface{}{
-			"name":            pool.cfg.ModelName,
-			"tags":            pool.cfg.Tags,
-			"max_concurrent":  pool.cfg.MaxConcurrent,
-			"requests":        len(pool.requests),
-			"available_slots": len(pool.semaphore),
+			"name":             pool.cfg.ModelName,
+			"tags":             pool.cfg.Tags,
+			"max_concurrent":   pool.cfg.MaxConcurrent,
+			"running_requests": pool.runningCount,
+			"waiting_requests": len(pool.waits),
 		}
 		pool.mutex.RUnlock()
 		poolDetails = append(poolDetails, poolInfo)

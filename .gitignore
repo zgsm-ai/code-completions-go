@@ -58,5 +58,10 @@ build-upload.sh
 !code-completion.template.yaml
 !tests/gen-llm-reports.sh
 !tests/gen-completion-reports.sh
+!tests/llm-perf-test.sh
+!tests/completion-perf-test.sh
+!tests/stress-test.sh
+!tests/completion-via-llm.sh
+!tests/completion-via-service.sh
 
 tests/.env*

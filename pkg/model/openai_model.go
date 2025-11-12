@@ -58,10 +58,6 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 		"temperature": p.Temperature,
 		"max_tokens":  maxTokens,
 		"stream":      false,
-		// "presence_penalty":  0.0,
-		// "frequency_penalty": 0.0,
-		// "top_p":             1,
-		// "suffix": p.Suffix,
 	}
 	if !m.cfg.FimMode && p.Suffix != "" {
 		data["suffix"] = p.Suffix
@@ -92,9 +88,10 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 	resp, err := client.Do(req)
 	if err != nil {
 		status := CompletionServerError
-		if err == context.Canceled {
+		switch err {
+		case context.Canceled:
 			status = CompletionCanceled
-		} else if err == context.DeadlineExceeded {
+		case context.DeadlineExceeded:
 			status = CompletionTimeout
 		}
 		return nil, &verbose, status, err
@@ -115,18 +112,18 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 	return &rsp, &verbose, CompletionSuccess, nil
 }
 
-func (m *OpenAIModel) getCompletionCode(result map[string]interface{}) (string, error) {
-	var completionText string
-	// 从模型结果中获取补全文本，这里需要根据实际的模型返回结构进行调整
-	if result != nil {
-		if choices, ok := result["choices"].([]interface{}); ok && len(choices) > 0 {
-			// 获取第一个choice作为主要补全文本
-			if choice, ok := choices[0].(map[string]interface{}); ok {
-				if text, ok := choice["text"].(string); ok {
-					completionText = text
-				}
-			}
-		}
-	}
-	return completionText, nil
-}
+// func (m *OpenAIModel) getCompletionCode(result map[string]interface{}) (string, error) {
+// 	var completionText string
+// 	// 从模型结果中获取补全文本，这里需要根据实际的模型返回结构进行调整
+// 	if result != nil {
+// 		if choices, ok := result["choices"].([]interface{}); ok && len(choices) > 0 {
+// 			// 获取第一个choice作为主要补全文本
+// 			if choice, ok := choices[0].(map[string]interface{}); ok {
+// 				if text, ok := choice["text"].(string); ok {
+// 					completionText = text
+// 				}
+// 			}
+// 		}
+// 	}
+// 	return completionText, nil
+// }

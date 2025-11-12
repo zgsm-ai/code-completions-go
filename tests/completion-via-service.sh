@@ -206,10 +206,12 @@ if [ X"$CLIENT_ID" != X"" ]; then
   DATA=`jq --arg newValue "$CLIENT_ID" '.client_id = $newValue' <<< "$DATA"`
 fi
 
+if [ X"$COMPLETION_ID" == X"" ]; then
+  COMPLETION_ID=$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | hexdump -v -e '/1 "%02x"')
+fi
+
 if [ X"$COMPLETION_ID" != X"" ]; then
   DATA=`jq --arg newValue "$COMPLETION_ID" '.completion_id = $newValue' <<< "$DATA"`
-else
-  COMPLETION_ID="666-94131415"
 fi
 
 if [ X"$PROJECT_PATH" != X"" ]; then

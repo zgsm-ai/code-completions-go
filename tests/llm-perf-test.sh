@@ -34,8 +34,8 @@ if [ -f "./.env" ]; then
 fi
 
 # 检查必要文件是否存在
-if [ ! -f "./completion-bare.sh" ]; then
-    echo "错误：找不到 completion-bare.sh 文件"
+if [ ! -f "./completion-via-llm.sh" ]; then
+    echo "错误：找不到 completion-via-llm.sh 文件"
     exit 1
 fi
 
@@ -127,8 +127,8 @@ for filepath in $file_list; do
     # 执行补全请求
     response_file="$RESULTS_DIR/${filename%.*}.json"
     echo "[$current_test/$total_files] 测试文件: $filename"
-    # 使用completion-bare.sh发送请求并保存响应
-    if ./completion-bare.sh -f "data/$filename" $KEY_OPT $FIM_OPT -m "$LLM_NAME" -a "$LLM_URL" -o "$response_file"; then
+    # 使用completion-via-llm.sh发送请求并保存响应
+    if ./completion-via-llm.sh -f "data/$filename" $KEY_OPT $FIM_OPT -m "$LLM_NAME" -a "$LLM_URL" -o "$response_file"; then
         # 记录结束时间
         end_time=$(date +%s%3N)
         response_time=$((end_time - start_time))
@@ -176,6 +176,4 @@ else
     echo "警告: 找不到gen-llm-reports.sh脚本，跳过报告生成"
 fi
 
-echo "所有任务已完成。"
-cat $RESULTS_DIR/perf_summary.txt
 exit 0

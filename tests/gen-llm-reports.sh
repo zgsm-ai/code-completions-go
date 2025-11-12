@@ -146,6 +146,18 @@ else
     echo "未提供JSON性能数据文件或文件不存在: $PERF_JSON_FILE"
 fi
 
+# 格式化RESPONSE_DIR目录下的所有JSON文件
+echo "格式化RESPONSE_DIR目录下的JSON文件..."
+format_json_count=0
+for json_file in "$RESPONSE_DIR"/*.json; do
+    if [ -f "$json_file" ]; then
+        # 使用jq格式化JSON文件，并保存回原文件
+        jq '.' "$json_file" > "$json_file.tmp" && mv "$json_file.tmp" "$json_file"
+        format_json_count=$((format_json_count + 1))
+    fi
+done
+echo "已格式化 $format_json_count 个JSON文件"
+
 # 使用响应文件目录方式处理数据
 echo "使用响应文件目录方式处理数据..."
 
@@ -179,8 +191,8 @@ for filepath in $file_list; do
             total_success=$((total_success + 1))
             
             # 从verbose.output.usage中提取token信息
-            prompt_tokens=$(jq -r '.verbose.output.usage.prompt_tokens // "N/A"' "$response_file" 2>/dev/null)
-            completion_tokens=$(jq -r '.verbose.output.usage.completion_tokens // "N/A"' "$response_file" 2>/dev/null)
+            prompt_tokens=$(jq -r '.usage.prompt_tokens // "N/A"' "$response_file" 2>/dev/null)
+            completion_tokens=$(jq -r '.usage.completion_tokens // "N/A"' "$response_file" 2>/dev/null)
             # 从usage.total_duration中提取总持续时间（单位是纳秒，需要转换为毫秒）
             total_duration_ns=$(jq -r '.usage.total_duration // "N/A"' "$response_file" 2>/dev/null)
             
@@ -287,4 +299,4 @@ echo "  总输出Token: $total_completion_tokens" >> "$summary_file"
 
 echo "CSV结果文件已保存到: $result_file"
 echo "性能测试汇总报告已保存到: $summary_file"
-echo "报告生成完成。"
+cat $summary_file

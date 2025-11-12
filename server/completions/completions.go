@@ -50,7 +50,7 @@ func Completions(c *gin.Context) {
 
 func respCompletion(c *gin.Context, req *completions.CompletionRequest, rsp *completions.CompletionResponse) {
 	if rsp.Status != model.CompletionSuccess {
-		zap.L().Warn("completion error", zap.String("completionID", rsp.ID),
+		zap.L().Warn("completion failed", zap.String("completionID", rsp.ID),
 			zap.String("clientID", req.ClientID),
 			zap.String("status", string(rsp.Status)),
 			zap.Any("response", rsp))

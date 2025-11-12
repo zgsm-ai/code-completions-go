@@ -77,7 +77,7 @@ func resetDefValues(c *Conf) {
 		c.StreamController.QueueTimeout = 1000 * time.Millisecond
 	}
 	if c.StreamController.CompletionTimeout == 0 {
-		c.StreamController.CompletionTimeout = 4500 * time.Microsecond
+		c.StreamController.CompletionTimeout = 2500 * time.Millisecond
 	}
 }
 

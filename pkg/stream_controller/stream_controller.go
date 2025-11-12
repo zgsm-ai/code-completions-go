@@ -5,7 +5,6 @@ import (
 	"code-completion/pkg/config"
 	"code-completion/pkg/metrics"
 	"context"
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -48,11 +47,9 @@ func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, input 
 	}
 	// 将请求添加到客户端队列，获取包含响应通道的ClientRequest
 	creq := sc.queues.AddRequest(ctx, input)
-	// 更新并发连接总数指标
 	metrics.UpdateCompletionConcurrent(sc.queues.GetGlobalQueueLength())
 	defer func() {
 		sc.queues.RemoveRequest(creq)
-		// 更新并发连接总数指标
 		metrics.UpdateCompletionConcurrent(sc.queues.GetGlobalQueueLength())
 	}()
 
@@ -63,36 +60,36 @@ func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, input 
 	}
 	creq.Perf.EnqueueTime = time.Now().Local()
 
-	go sc.scheduleRequest()
+	return sc.pools.WaitDoRequest(creq)
 
-	// 等待响应或错误
-	select {
-	case rsp := <-creq.rspChan:
-		return rsp
-	case <-creq.ctx.Done():
-		zap.L().Debug("ProcessCompletionRequest context canceled",
-			zap.String("clientID", input.ClientID),
-			zap.String("completionID", input.CompletionID),
-			zap.Error(creq.ctx.Err()))
-		return completions.CancelRequest(&input.CompletionRequest, &creq.Perf, creq.ctx.Err())
-	}
+	// // 等待响应或错误
+	// select {
+	// case rsp := <-creq.rspChan:
+	// 	return rsp
+	// case <-creq.ctx.Done():
+	// 	zap.L().Debug("ProcessCompletionRequest context canceled",
+	// 		zap.String("clientID", input.ClientID),
+	// 		zap.String("completionID", input.CompletionID),
+	// 		zap.Error(creq.ctx.Err()))
+	// 	return completions.CancelRequest(&input.CompletionRequest, &creq.Perf, creq.ctx.Err())
+	// }
 }
 
-// 调度请求，从所有客户端队列中选择最早的请求进行处理
-func (sc *StreamController) scheduleRequest() error {
-	// 1. 从所有客户端队列中找到最早的请求
-	req := sc.queues.FindEarliestRequest()
-	if req == nil {
-		return fmt.Errorf("no available requests to process")
-	}
+// // 调度请求，从所有客户端队列中选择最早的请求进行处理
+// func (sc *StreamController) scheduleRequest() error {
+// 	// 1. 从所有客户端队列中找到最早的请求
+// 	req := sc.queues.FindEarliestRequest()
+// 	if req == nil {
+// 		return fmt.Errorf("no available requests to process")
+// 	}
 
-	// 2. 将请求添加到模型请求池，执行模型调用
-	rsp := sc.pools.WaitDoRequest(req)
+// 	// 2. 将请求添加到模型请求池，执行模型调用
+// 	rsp := sc.pools.WaitDoRequest(req)
 
-	// 3. 将模型的响应或错误发送到对应的通道
-	req.rspChan <- rsp
-	return nil
-}
+// 	// 3. 将模型的响应或错误发送到对应的通道
+// 	req.rspChan <- rsp
+// 	return nil
+// }
 
 // 不使用流控的处理方式
 func (sc *StreamController) processWithoutStreamControl(ctx context.Context, input *completions.CompletionInput) *completions.CompletionResponse {
@@ -113,7 +110,6 @@ func (sc *StreamController) StartMaintainRoutine(interval time.Duration) {
 
 		for range ticker.C {
 			sc.queues.Cleanup()
-			sc.updateMetrics()
 			zap.L().Info("StreamController maintain", zap.Any("stats", sc.GetStats()))
 		}
 	}()
@@ -127,11 +123,4 @@ func (sc *StreamController) GetStats() map[string]interface{} {
 	stats["queues"] = sc.queues.GetStats()
 	stats["pools"] = sc.pools.GetStats()
 	return stats
-}
-
-// 更新指标
-func (sc *StreamController) updateMetrics() {
-	// 更新并发连接总数指标
-	concurrentCount := sc.queues.GetGlobalQueueLength()
-	metrics.UpdateCompletionConcurrent(concurrentCount)
 }
