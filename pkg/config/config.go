@@ -49,6 +49,7 @@ type CodebaseContextConfig struct {
 
 type StreamControllerConfig struct {
 	MaintainInterval  time.Duration `json:"maintainInterval" yaml:"maintainInterval"`   // 定时维护的间隔
+	CleanOlderThan    time.Duration `json:"cleanOlderThan" yaml:"cleanOlderThan"`       // 清理过期客户端的最大间隔
 	CompletionTimeout time.Duration `json:"completionTimeout" yaml:"completionTimeout"` // 一个补全请求的最大超时
 	QueueTimeout      time.Duration `json:"queueTimeout" yaml:"queueTimeout"`           // 排队超时
 }
@@ -74,10 +75,13 @@ var Config = &Conf{}
 
 func resetDefValues(c *Conf) {
 	if c.StreamController.QueueTimeout == 0 {
-		c.StreamController.QueueTimeout = 1000 * time.Millisecond
+		c.StreamController.QueueTimeout = 200 * time.Millisecond
 	}
 	if c.StreamController.CompletionTimeout == 0 {
 		c.StreamController.CompletionTimeout = 2500 * time.Millisecond
+	}
+	if c.StreamController.CleanOlderThan == 0 {
+		c.StreamController.CleanOlderThan = 1 * time.Hour
 	}
 }
 

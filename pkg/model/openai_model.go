@@ -68,13 +68,13 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 	// 将data转换为JSON
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		return nil, &verbose, CompletionServerError, err
+		return nil, &verbose, StatusServerError, err
 	}
 
 	// 创建HTTP请求
 	req, err := http.NewRequestWithContext(ctx, "POST", m.cfg.CompletionsUrl, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, &verbose, CompletionReqError, err
+		return nil, &verbose, StatusReqError, err
 	}
 
 	// 设置请求头
@@ -87,43 +87,27 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		status := CompletionServerError
+		status := StatusServerError
 		switch err {
 		case context.Canceled:
-			status = CompletionCanceled
+			status = StatusCanceled
 		case context.DeadlineExceeded:
-			status = CompletionTimeout
+			status = StatusTimeout
 		}
 		return nil, &verbose, status, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, &verbose, CompletionServerError, err
+		return nil, &verbose, StatusServerError, err
 	}
 	json.Unmarshal(body, &verbose.Output)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &verbose, CompletionModelError, fmt.Errorf("Invalid StatusCode(%d)", resp.StatusCode)
+		return nil, &verbose, StatusModelError, fmt.Errorf("Invalid StatusCode(%d)", resp.StatusCode)
 	}
 	var rsp CompletionResponse
 	if err := json.Unmarshal(body, &rsp); err != nil {
-		return nil, &verbose, CompletionServerError, err
+		return nil, &verbose, StatusServerError, err
 	}
-	return &rsp, &verbose, CompletionSuccess, nil
+	return &rsp, &verbose, StatusSuccess, nil
 }
-
-// func (m *OpenAIModel) getCompletionCode(result map[string]interface{}) (string, error) {
-// 	var completionText string
-// 	// 从模型结果中获取补全文本，这里需要根据实际的模型返回结构进行调整
-// 	if result != nil {
-// 		if choices, ok := result["choices"].([]interface{}); ok && len(choices) > 0 {
-// 			// 获取第一个choice作为主要补全文本
-// 			if choice, ok := choices[0].(map[string]interface{}); ok {
-// 				if text, ok := choice["text"].(string); ok {
-// 					completionText = text
-// 				}
-// 			}
-// 		}
-// 	}
-// 	return completionText, nil
-// }

@@ -3,8 +3,9 @@ package stream_controller
 import (
 	"code-completion/pkg/completions"
 	"code-completion/pkg/config"
-	"code-completion/pkg/metrics"
+	"code-completion/pkg/model"
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -45,51 +46,28 @@ func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, input 
 	if input.ClientID == "" { // 如果无法获取客户端ID，使用默认处理方式
 		return sc.processWithoutStreamControl(ctx, input)
 	}
+
 	// 将请求添加到客户端队列，获取包含响应通道的ClientRequest
-	creq := sc.queues.AddRequest(ctx, input)
-	metrics.UpdateCompletionConcurrent(sc.queues.GetGlobalQueueLength())
+	req := sc.queues.AddRequest(ctx, input)
+	pool := sc.pools.SelectIdlestPool(input.Model)
+	if pool == nil {
+		req.Input.SelectedModel = input.Model
+		return completions.RejectRequest(req.Input, &req.Perf, model.StatusBusy, fmt.Errorf("model pool busy, cancel request"))
+	}
+	req.Input.SelectedModel = pool.cfg.ModelName
 	defer func() {
-		sc.queues.RemoveRequest(creq)
-		metrics.UpdateCompletionConcurrent(sc.queues.GetGlobalQueueLength())
+		sc.queues.RemoveRequest(req)
 	}()
 
-	c := completions.NewCompletionContext(creq.ctx, &creq.Perf)
+	c := completions.NewCompletionContext(req.ctx, &req.Perf)
 	rsp := input.Preprocess(c)
 	if rsp != nil {
 		return rsp
 	}
-	creq.Perf.EnqueueTime = time.Now().Local()
+	req.Perf.EnqueueTime = time.Now().Local()
 
-	return sc.pools.WaitDoRequest(creq)
-
-	// // 等待响应或错误
-	// select {
-	// case rsp := <-creq.rspChan:
-	// 	return rsp
-	// case <-creq.ctx.Done():
-	// 	zap.L().Debug("ProcessCompletionRequest context canceled",
-	// 		zap.String("clientID", input.ClientID),
-	// 		zap.String("completionID", input.CompletionID),
-	// 		zap.Error(creq.ctx.Err()))
-	// 	return completions.CancelRequest(&input.CompletionRequest, &creq.Perf, creq.ctx.Err())
-	// }
+	return sc.pools.WaitDoRequest(req)
 }
-
-// // 调度请求，从所有客户端队列中选择最早的请求进行处理
-// func (sc *StreamController) scheduleRequest() error {
-// 	// 1. 从所有客户端队列中找到最早的请求
-// 	req := sc.queues.FindEarliestRequest()
-// 	if req == nil {
-// 		return fmt.Errorf("no available requests to process")
-// 	}
-
-// 	// 2. 将请求添加到模型请求池，执行模型调用
-// 	rsp := sc.pools.WaitDoRequest(req)
-
-// 	// 3. 将模型的响应或错误发送到对应的通道
-// 	req.rspChan <- rsp
-// 	return nil
-// }
 
 // 不使用流控的处理方式
 func (sc *StreamController) processWithoutStreamControl(ctx context.Context, input *completions.CompletionInput) *completions.CompletionResponse {
@@ -123,4 +101,11 @@ func (sc *StreamController) GetStats() map[string]interface{} {
 	stats["queues"] = sc.queues.GetStats()
 	stats["pools"] = sc.pools.GetStats()
 	return stats
+}
+
+func (sc *StreamController) GetDetails() map[string]interface{} {
+	details := make(map[string]interface{})
+	details["queues"] = sc.queues.GetDetails()
+	details["pools"] = sc.pools.GetDetails()
+	return details
 }

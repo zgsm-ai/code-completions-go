@@ -22,14 +22,15 @@ type CompletionVerbose struct {
 type CompletionStatus string
 
 const (
-	CompletionSuccess     CompletionStatus = "success"     //补全成功
-	CompletionReqError    CompletionStatus = "reqError"    //请求存在错误
-	CompletionServerError CompletionStatus = "serverError" //服务端错误
-	CompletionModelError  CompletionStatus = "modelError"  //模型响应错误
-	CompletionEmpty       CompletionStatus = "empty"       //补全结果为空
-	CompletionRejected    CompletionStatus = "rejected"    //根据规则拒绝补全
-	CompletionTimeout     CompletionStatus = "timeout"     //补全请求超时
-	CompletionCanceled    CompletionStatus = "canceled"    //用户取消
+	StatusSuccess     CompletionStatus = "success"     //补全成功
+	StatusReqError    CompletionStatus = "reqError"    //请求存在错误
+	StatusServerError CompletionStatus = "serverError" //服务端错误
+	StatusModelError  CompletionStatus = "modelError"  //模型响应错误
+	StatusEmpty       CompletionStatus = "empty"       //补全结果为空
+	StatusRejected    CompletionStatus = "rejected"    //根据规则拒绝补全
+	StatusTimeout     CompletionStatus = "timeout"     //补全请求超时
+	StatusCanceled    CompletionStatus = "canceled"    //用户取消
+	StatusBusy        CompletionStatus = "busy"        //服务端繁忙
 )
 
 //	OpenAI v1/completions协议的请求和响应结构定义

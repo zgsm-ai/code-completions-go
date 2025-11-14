@@ -4,9 +4,9 @@
 # 以串行方式测试补全模型对各种代码文件进行补全时的效果和性能
 
 # 默认参数值
-EXPOSE=true
+COMPLETION_EXPOSE=true
 COMPLETION_URL=""
-API_KEY=""
+COMPLETION_APIKEY=""
 
 # 如果存在./.env文件，则加载它
 if [ -f "./.env" ]; then
@@ -19,7 +19,7 @@ show_help() {
     echo "用法: $0 [选项]"
     echo ""
     echo "选项:"
-    echo "  --no-expose       在执行测试前不调用 expose-completion.sh 暴露服务端口 (默认: false)"
+    echo "  --no-expose      在执行测试前不调用 expose-completion.sh 暴露服务端口 (默认: false)"
     echo "  --key KEY        指定调用completion-via-service.sh时使用的API密钥"
     echo "  --url URL        指定调用completion-via-service.sh时使用的URL，即COMPLETION_URL变量的值"
     echo "  -h, --help       显示此帮助信息"
@@ -35,11 +35,11 @@ show_help() {
 while [[ $# -gt 0 ]]; do
     case $1 in
         --no-expose)
-            EXPOSE=false
+            COMPLETION_EXPOSE=false
             shift
             ;;
         --key)
-            API_KEY="$2"
+            COMPLETION_APIKEY="$2"
             shift 2
             ;;
         --url)
@@ -64,14 +64,9 @@ if [ ! -f "./completion-via-service.sh" ]; then
     exit 1
 fi
 
-if [ ! -f "./expose-completion.sh" ]; then
-    echo "错误：找不到 expose-completion.sh 文件"
-    exit 1
-fi
-
 KEY_OPT=""
-if [ ! -z "$API_KEY" ]; then
-    KEY_OPT="-k $API_KEY"
+if [ ! -z "$COMPLETION_APIKEY" ]; then
+    KEY_OPT="-k $COMPLETION_APIKEY"
 fi
 
 # 创建结果目录
@@ -104,8 +99,12 @@ get_language_by_extension() {
     esac
 }
 
-# 根据 EXPOSE 参数决定是否执行 expose-completion.sh
-if [ "$EXPOSE" = true ]; then
+# 根据 COMPLETION_EXPOSE 参数决定是否执行 expose-completion.sh
+if [ "$COMPLETION_EXPOSE" = true ]; then
+    if [ ! -f "./expose-completion.sh" ]; then
+        echo "错误：找不到 expose-completion.sh 文件"
+        exit 1
+    fi
     # 检查 32088 端口是否已经被占用
     echo "检查 32088 端口状态..."
     if netstat -tuln | grep -q ":32088 "; then
@@ -128,7 +127,7 @@ if [ "$EXPOSE" = true ]; then
         echo "expose-completion.sh 已启动，PID: $EXPOSE_PID"
     fi
 else
-    echo "EXPOSE=false，跳过 expose-completion.sh 的执行"
+    echo "COMPLETION_EXPOSE=false，跳过 expose-completion.sh 的执行"
     EXPOSE_PID=""
 fi
 

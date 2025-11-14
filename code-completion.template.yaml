@@ -16,8 +16,8 @@ data:
       semanticScoreThreshold: 0.5
       relationLayer: 3
       relationIncludeContent: false
-      requestTimeout: 800ms
-      totalTimeout: 1000ms
+      requestTimeout: 400ms
+      totalTimeout: 500ms
     models:
       - completionsUrl: "${{__env_profile.completions_url}}"
         provider: deepseek
@@ -27,9 +27,9 @@ data:
         tags: 
           - fasttransformer
           - deepseek
-        timeout: 3000ms
-        maxPrefixContext: 4096
-        maxSuffixContext: 1024
+        timeout: 1000ms
+        maxPrefixContext: 512
+        maxSuffixContext: 50
         maxOutputToken: 50
         fimBegin: "<｜fim▁begin｜>"
         fimEnd: "<｜fim▁end｜>"
@@ -40,8 +40,9 @@ data:
         disablePrune: false
     streamController:
       maintainInterval: 600s
-      completionTimeout: 4500ms
-      queueTimeout: 1000ms
+      completionTimeout: 2500ms
+      queueTimeout: 200ms
+      cleanOlderThan: 24h
     completionsConfig:
       disableScore: true
       disableLanguageFeature: false

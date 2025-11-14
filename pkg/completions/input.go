@@ -3,15 +3,17 @@ package completions
 import (
 	"code-completion/pkg/codebase_context"
 	"code-completion/pkg/config"
+	"code-completion/pkg/model"
 	"net/http"
 	"strings"
 	"time"
 )
 
 type CompletionInput struct {
-	CompletionRequest
-	Headers   http.Header
-	PromptExt PromptOptions
+	CompletionRequest               //原始请求中的BODY
+	Headers           http.Header   //原始请求中的头部
+	Processed         PromptOptions //加工过的提示词
+	SelectedModel     string        //根据服务端设置调整过的模型
 }
 
 var contextClient *codebase_context.ContextClient
@@ -22,15 +24,12 @@ func (in *CompletionInput) Preprocess(c *CompletionContext) *CompletionResponse 
 	err := NewFilterChain(&config.Config.CompletionsConfig).Handle(&in.CompletionRequest)
 	if err != nil {
 		c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
-		return RejectRequest(&in.CompletionRequest, c.Perf, err)
+		return RejectRequest(in, c.Perf, model.StatusRejected, err)
 	}
-
 	// 1. 解析请求参数
 	in.GetPrompts()
-
 	// 2. 获取上下文信息
 	in.GetContext(c)
-
 	return nil
 }
 
@@ -38,19 +37,19 @@ func (in *CompletionInput) Preprocess(c *CompletionContext) *CompletionResponse 
  * 获取上下文信息
  */
 func (in *CompletionInput) GetContext(c *CompletionContext) {
-	if in.PromptExt.CodeContext != "" {
+	if in.Processed.CodeContext != "" {
 		return
 	}
 	if contextClient == nil {
 		contextClient = codebase_context.NewContextClient()
 	}
-	in.PromptExt.CodeContext = contextClient.GetContext(
+	in.Processed.CodeContext = contextClient.GetContext(
 		c.Ctx,
 		in.ClientID,
 		in.ProjectPath,
 		in.FileProjectPath,
-		in.PromptExt.Prefix,
-		in.PromptExt.Suffix,
+		in.Processed.Prefix,
+		in.Processed.Suffix,
 		in.ImportContent,
 		in.Headers,
 	)
@@ -63,28 +62,28 @@ func (in *CompletionInput) GetContext(c *CompletionContext) {
 func (in *CompletionInput) GetPrompts() {
 	req := &in.CompletionRequest
 	if req.PromptOptions != nil {
-		in.PromptExt = *req.PromptOptions
+		in.Processed = *req.PromptOptions
 	} else {
 		// 简单的提示词解析逻辑，参考Python代码
 		// 可以根据FIM_INDICATOR分割prompt来获取prefix和suffix
-		in.PromptExt.Prefix = req.Prompt
+		in.Processed.Prefix = req.Prompt
 	}
 
 	// 如果linePrefix为空，从prefix中提取
-	if in.PromptExt.CursorLinePrefix == "" && in.PromptExt.Prefix != "" {
-		lines := strings.Split(in.PromptExt.Prefix, "\n")
+	if in.Processed.CursorLinePrefix == "" && in.Processed.Prefix != "" {
+		lines := strings.Split(in.Processed.Prefix, "\n")
 		if len(lines) > 0 {
-			in.PromptExt.CursorLinePrefix = lines[len(lines)-1]
+			in.Processed.CursorLinePrefix = lines[len(lines)-1]
 		}
 	}
 
 	// 如果lineSuffix为空，从suffix中提取
-	if in.PromptExt.CursorLineSuffix == "" && in.PromptExt.Suffix != "" {
-		lines := strings.Split(in.PromptExt.Suffix, "\n")
+	if in.Processed.CursorLineSuffix == "" && in.Processed.Suffix != "" {
+		lines := strings.Split(in.Processed.Suffix, "\n")
 		if len(lines) > 0 {
-			in.PromptExt.CursorLineSuffix = lines[0]
+			in.Processed.CursorLineSuffix = lines[0]
 			if len(lines) > 1 {
-				in.PromptExt.CursorLineSuffix += "\n"
+				in.Processed.CursorLineSuffix += "\n"
 			}
 		}
 	}

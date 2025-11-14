@@ -397,10 +397,10 @@ const docTemplate = `{
                 "timeout"
             ],
             "x-enum-comments": {
-                "CompletionModelError": "模型响应错误",
-                "CompletionRejected": "根据规则拒绝补全",
-                "CompletionReqError": "请求存在错误",
-                "CompletionServerError": "服务端错误"
+                "StatusModelError": "模型响应错误",
+                "StatusRejected": "根据规则拒绝补全",
+                "StatusReqError": "请求存在错误",
+                "StatusServerError": "服务端错误"
             },
             "x-enum-descriptions": [
                 "",
@@ -413,14 +413,14 @@ const docTemplate = `{
                 ""
             ],
             "x-enum-varnames": [
-                "CompletionSuccess",
-                "CompletionModelError",
-                "CompletionReqError",
-                "CompletionEmpty",
+                "StatusSuccess",
+                "StatusModelError",
+                "StatusReqError",
+                "StatusEmpty",
                 "CompletionProcessEmpty",
-                "CompletionServerError",
-                "CompletionRejected",
-                "CompletionTimeout"
+                "StatusServerError",
+                "StatusRejected",
+                "StatusTimeout"
             ]
         },
         "server.LogSettings": {

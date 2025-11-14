@@ -41,7 +41,7 @@ func NewCompletionHandler(m model.LLM) *CompletionHandler {
 // 处理补全请求
 func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput) *CompletionResponse {
 	// 3. 补全模型相关的前置处理 （拼接prompt策略，单行/多行补全策略，裁剪过长上下文）
-	h.truncatePrompt(h.cfg, &input.PromptExt)
+	h.truncatePrompt(h.cfg, &input.Processed)
 
 	// 4. 准备停用词，根据是否单行补全调整停用词
 	stopWords := h.prepareStopWords(input)
@@ -51,9 +51,9 @@ func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput
 	para.Model = input.Model
 	para.ClientID = input.ClientID
 	para.CompletionID = input.CompletionID
-	para.Prefix = input.PromptExt.Prefix
-	para.Suffix = input.PromptExt.Suffix
-	para.CodeContext = input.PromptExt.CodeContext
+	para.Prefix = input.Processed.Prefix
+	para.Suffix = input.Processed.Suffix
+	para.CodeContext = input.Processed.CodeContext
 	para.Stop = stopWords
 	para.MaxTokens = h.cfg.MaxOutputToken
 	para.Temperature = float32(input.Temperature)
@@ -63,10 +63,10 @@ func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput
 	modelEndTime := time.Now().Local()
 	c.Perf.LLMDuration = modelEndTime.Sub(modelStartTime)
 
-	if completionStatus != model.CompletionSuccess {
-		c.Perf.PromptTokens = h.getTokensCount(input.PromptExt.Prefix) + h.getTokensCount(input.PromptExt.CodeContext)
+	if completionStatus != model.StatusSuccess {
+		c.Perf.PromptTokens = h.getTokensCount(input.Processed.Prefix) + h.getTokensCount(input.Processed.CodeContext)
 		c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
-		return ErrorResponse(&input.CompletionRequest, completionStatus, c.Perf, verbose, err)
+		return ErrorResponse(input, completionStatus, c.Perf, verbose, err)
 	}
 
 	// 6. 补全后置处理
@@ -83,11 +83,11 @@ func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput
 	c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
 
 	if completionText == "" {
-		return ErrorResponse(&input.CompletionRequest, model.CompletionEmpty, c.Perf, verbose, fmt.Errorf("empty"))
+		return ErrorResponse(input, model.StatusEmpty, c.Perf, verbose, fmt.Errorf("empty"))
 	}
 
 	// 7. 构建响应
-	return SuccessResponse(&input.CompletionRequest, completionText, c.Perf, verbose)
+	return SuccessResponse(input, completionText, c.Perf, verbose)
 }
 
 // 完整处理补全请求
@@ -96,6 +96,5 @@ func (h *CompletionHandler) HandleCompletion(c *CompletionContext, input *Comple
 	if rsp != nil {
 		return rsp
 	}
-
 	return h.CallLLM(c, input)
 }

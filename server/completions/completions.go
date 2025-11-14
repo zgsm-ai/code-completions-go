@@ -49,7 +49,7 @@ func Completions(c *gin.Context) {
 }
 
 func respCompletion(c *gin.Context, req *completions.CompletionRequest, rsp *completions.CompletionResponse) {
-	if rsp.Status != model.CompletionSuccess {
+	if rsp.Status != model.StatusSuccess {
 		zap.L().Warn("completion failed", zap.String("completionID", rsp.ID),
 			zap.String("clientID", req.ClientID),
 			zap.String("status", string(rsp.Status)),
@@ -61,14 +61,14 @@ func respCompletion(c *gin.Context, req *completions.CompletionRequest, rsp *com
 	}
 	statusCode := http.StatusOK
 	// switch rsp.Status {
-	// case model.CompletionSuccess:
+	// case model.StatusSuccess:
 	// 	statusCode = http.StatusOK
-	// case model.CompletionCanceled:
+	// case model.StatusCanceled:
 	// 	statusCode = http.StatusRequestTimeout
-	// case model.CompletionTimeout:
+	// case model.StatusTimeout:
 	// 	statusCode = http.StatusGatewayTimeout
-	// case model.CompletionReqError:
-	// case model.CompletionRejected:
+	// case model.StatusReqError:
+	// case model.StatusRejected:
 	// 	statusCode = http.StatusBadRequest
 	// default:
 	// 	statusCode = http.StatusInternalServerError

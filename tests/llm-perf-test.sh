@@ -24,7 +24,8 @@ show_usage() {
 LLM_URL=""
 LLM_KEY=""
 LLM_NAME=""
-USE_FIM=false
+LLM_USE_FIM=false
+
 RESULTS_DIR=""
 
 # 如果存在./.env文件，则加载它
@@ -55,7 +56,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -f|--fim)
-            USE_FIM=true
+            LLM_USE_FIM=true
             shift
             ;;
         -o|--output)
@@ -82,7 +83,7 @@ if [ ! -z "$LLM_KEY" ]; then
 fi
 
 # 设置FIM选项
-if [ "$USE_FIM" = true ]; then
+if [ "$LLM_USE_FIM" = true ]; then
     FIM_OPT="-i"
 fi
 
@@ -90,7 +91,7 @@ echo "配置信息:"
 echo "  URL: $LLM_URL"
 echo "  模型: $LLM_NAME"
 echo "  API密钥: ${LLM_KEY:0:10}..."
-echo "  FIM模式: $USE_FIM"
+echo "  FIM模式: $LLM_USE_FIM"
 echo ""
 
 # 创建结果目录

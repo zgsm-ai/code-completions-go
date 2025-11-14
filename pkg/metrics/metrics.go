@@ -15,7 +15,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "completion_durations",
 			Help:    "Duration of each phase of completion requests in milliseconds",
-			Buckets: []float64{50, 100, 150, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 2000, 2500, 5000},
+			Buckets: []float64{50, 100, 150, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 2000, 2500, 3000, 5000},
 		},
 		[]string{"model", "status", "phase"},
 	)
@@ -60,29 +60,6 @@ var (
 	metricsMutex sync.Mutex
 )
 
-// Status 定义请求状态
-type Status string
-
-const (
-	StatusSuccess     Status = "success"
-	StatusModelError  Status = "modelError"
-	StatusReqError    Status = "reqError"
-	StatusServerError Status = "serverError"
-	StatusEmpty       Status = "empty"
-	StatusRejected    Status = "rejected"
-	StatusTimeout     Status = "timeout"
-	StatusCanceled    Status = "canceled"
-)
-
-type CompletionPhase string
-
-const (
-	PhaseQueue   CompletionPhase = "queue"
-	PhaseContext CompletionPhase = "context"
-	PhaseLLM     CompletionPhase = "llm"
-	PhaseTotal   CompletionPhase = "total"
-)
-
 // 定义token类型
 type TokenType string
 
@@ -92,14 +69,14 @@ const (
 )
 
 // 记录补全各阶段耗时
-func RecordCompletionDuration(model string, status Status, queue, context, llm, total time.Duration) {
+func RecordCompletionDuration(model string, status string, queue, context, llm, total time.Duration) {
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
 
-	completionDurations.WithLabelValues(model, string(status), "queue").Observe(float64(queue.Milliseconds()))
-	completionDurations.WithLabelValues(model, string(status), "context").Observe(float64(context.Milliseconds()))
-	completionDurations.WithLabelValues(model, string(status), "llm").Observe(float64(llm.Milliseconds()))
-	completionDurations.WithLabelValues(model, string(status), "total").Observe(float64(total.Milliseconds()))
+	completionDurations.WithLabelValues(model, status, "queue").Observe(float64(queue.Milliseconds()))
+	completionDurations.WithLabelValues(model, status, "context").Observe(float64(context.Milliseconds()))
+	completionDurations.WithLabelValues(model, status, "llm").Observe(float64(llm.Milliseconds()))
+	completionDurations.WithLabelValues(model, status, "total").Observe(float64(total.Milliseconds()))
 }
 
 // 记录每次请求的输入和输出token数分布
@@ -111,11 +88,11 @@ func RecordCompletionTokens(model string, tokenType TokenType, tokenCount int) {
 }
 
 // 记录请求总数，用于计算QPS和错误率
-func IncrementCompletionRequests(model string, status Status) {
+func IncrementCompletionRequests(model string, status string) {
 	metricsMutex.Lock()
 	defer metricsMutex.Unlock()
 
-	completionRequestsTotal.WithLabelValues(model, string(status)).Inc()
+	completionRequestsTotal.WithLabelValues(model, status).Inc()
 }
 
 // 更新当前各模型池并发的连接总数

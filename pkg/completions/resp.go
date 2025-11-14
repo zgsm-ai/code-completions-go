@@ -44,7 +44,7 @@ type CompletionResponse struct {
 	Verbose *model.CompletionVerbose `json:"verbose,omitempty"`
 }
 
-func Metrics(modelName string, status metrics.Status, perf *CompletionPerformance) {
+func Metrics(modelName string, status string, perf *CompletionPerformance) {
 	metrics.RecordCompletionDuration(modelName, status,
 		perf.QueueDuration, perf.ContextDuration, perf.LLMDuration, perf.TotalDuration)
 	metrics.IncrementCompletionRequests(modelName, status)
@@ -52,15 +52,15 @@ func Metrics(modelName string, status metrics.Status, perf *CompletionPerformanc
 	metrics.RecordCompletionTokens(modelName, metrics.TokenTypeOutput, perf.CompletionTokens)
 }
 
-func ErrorResponse(req *CompletionRequest, status model.CompletionStatus,
+func ErrorResponse(input *CompletionInput, status model.CompletionStatus,
 	perf *CompletionPerformance, verbose *model.CompletionVerbose, err error) *CompletionResponse {
 	if err == nil {
 		err = fmt.Errorf("%s", string(status))
 	}
-	Metrics(req.Model, metrics.Status(status), perf)
+	Metrics(input.SelectedModel, string(status), perf)
 	return &CompletionResponse{
-		ID:      req.CompletionID,
-		Model:   req.Model,
+		ID:      input.CompletionID,
+		Model:   input.SelectedModel,
 		Object:  "text_completion",
 		Choices: []CompletionChoice{{Text: ""}}, // 使用后置处理后的补全结果
 		Created: int(perf.ReceiveTime.Unix()),
@@ -71,35 +71,35 @@ func ErrorResponse(req *CompletionRequest, status model.CompletionStatus,
 	}
 }
 
-func SuccessResponse(req *CompletionRequest, completionText string, perf *CompletionPerformance,
+func SuccessResponse(input *CompletionInput, completionText string, perf *CompletionPerformance,
 	verbose *model.CompletionVerbose) *CompletionResponse {
-	if !req.Verbose {
+	if !input.Verbose {
 		verbose = nil
 	}
-	Metrics(req.Model, metrics.StatusSuccess, perf)
+	Metrics(input.SelectedModel, string(model.StatusSuccess), perf)
 	return &CompletionResponse{
-		ID:      req.CompletionID,
-		Model:   req.Model,
+		ID:      input.CompletionID,
+		Model:   input.SelectedModel,
 		Object:  "text_completion",
 		Choices: []CompletionChoice{{Text: completionText}}, // 使用后置处理后的补全结果
 		Created: int(perf.ReceiveTime.Unix()),
 		Usage:   *perf,
-		Status:  model.CompletionSuccess,
+		Status:  model.StatusSuccess,
 		Verbose: verbose,
 	}
 }
 
 // 取消请求
-func CancelRequest(req *CompletionRequest, perf *CompletionPerformance, err error) *CompletionResponse {
-	status := model.CompletionTimeout
+func CancelRequest(input *CompletionInput, perf *CompletionPerformance, err error) *CompletionResponse {
+	status := model.StatusTimeout
 	if err.Error() == context.Canceled.Error() {
-		status = model.CompletionCanceled
+		status = model.StatusCanceled
 	}
 	perf.TotalDuration = time.Since(perf.ReceiveTime)
-	Metrics(req.Model, metrics.Status(status), perf)
+	Metrics(input.SelectedModel, string(status), perf)
 	return &CompletionResponse{
-		ID:      req.CompletionID,
-		Model:   req.Model,
+		ID:      input.CompletionID,
+		Model:   input.SelectedModel,
 		Object:  "text_completion",
 		Choices: []CompletionChoice{{Text: ""}},
 		Created: int(perf.ReceiveTime.Unix()),
@@ -109,16 +109,16 @@ func CancelRequest(req *CompletionRequest, perf *CompletionPerformance, err erro
 	}
 }
 
-func RejectRequest(req *CompletionRequest, perf *CompletionPerformance, err error) *CompletionResponse {
-	Metrics(req.Model, metrics.StatusRejected, perf)
+func RejectRequest(input *CompletionInput, perf *CompletionPerformance, status model.CompletionStatus, err error) *CompletionResponse {
+	Metrics(input.SelectedModel, string(status), perf)
 	return &CompletionResponse{
-		ID:      req.CompletionID,
-		Model:   req.Model,
+		ID:      input.CompletionID,
+		Model:   input.SelectedModel,
 		Object:  "text_completion",
 		Choices: []CompletionChoice{{Text: ""}},
 		Created: int(perf.ReceiveTime.Unix()),
 		Usage:   *perf,
-		Status:  model.CompletionRejected,
+		Status:  status,
 		Error:   err.Error(),
 	}
 }

@@ -100,7 +100,7 @@ func (h *CompletionHandler) prepareStopWords(input *CompletionInput) []string {
 	stopWords = append(stopWords, "<｜end▁of▁sentence｜>")
 
 	// 如果后缀为空，添加系统停用词
-	if input.PromptExt.Suffix == "" || strings.TrimSpace(input.PromptExt.Suffix) == "" {
+	if input.Processed.Suffix == "" || strings.TrimSpace(input.Processed.Suffix) == "" {
 		stopWords = append(stopWords, "\n\n", "\n\n\n")
 	}
 

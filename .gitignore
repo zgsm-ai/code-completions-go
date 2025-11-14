@@ -63,5 +63,7 @@ build-upload.sh
 !tests/stress-test.sh
 !tests/completion-via-llm.sh
 !tests/completion-via-service.sh
+!tests/completion-debug.sh
+!tests/expose-svc.sh
 
 tests/.env*

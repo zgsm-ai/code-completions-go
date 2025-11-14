@@ -103,7 +103,7 @@ mkdir -p "$OUTPUT_DIR"
 
 # 创建结果文件
 result_file="$OUTPUT_DIR/perf_results.csv"
-echo "filename,status,fulltime,prompt_tokens,completion_tokens,total_duration" > "$result_file"
+echo "filename,filesize,status,fulltime,prompt_tokens,completion_tokens,total_duration" > "$result_file"
 
 echo "处理测试结果..."
 processed=0
@@ -187,6 +187,13 @@ total_files=$(echo "$file_list" | wc -l)
 for filepath in $file_list; do
     # 获取文件名（不包含路径）
     filename=$(basename "$filepath")
+    
+    # 获取文件大小（字节）
+    if [ -f "$filepath" ]; then
+        filesize=$(stat -c%s "$filepath" 2>/dev/null || stat -f%z "$filepath" 2>/dev/null || echo "N/A")
+    else
+        filesize="N/A"
+    fi
     
     # 查找对应的响应文件
     response_file="$RESPONSE_DIR/${filename%.*}.json"
@@ -277,7 +284,7 @@ for filepath in $file_list; do
                 completion_tokens="N/A"
             fi
             
-            echo "  文件: $filename, 状态: $status, fulltime: $fulltime, 输入Token: $prompt_tokens, 输出Token: $completion_tokens, 总持续时间: $total_duration"
+            echo "  文件: $filename, 大小: $filesize 字节, 状态: $status, fulltime: $fulltime, 输入Token: $prompt_tokens, 输出Token: $completion_tokens, 总持续时间: $total_duration"
         else
             echo "  文件: $filename, 状态: $status, 响应文件格式错误"
         fi
@@ -289,7 +296,7 @@ for filepath in $file_list; do
     fi
     
     # 记录结果到CSV
-    echo "$filename,$status,$fulltime,$prompt_tokens,$completion_tokens,$total_duration" >> "$result_file"
+    echo "$filename,$filesize,$status,$fulltime,$prompt_tokens,$completion_tokens,$total_duration" >> "$result_file"
 done
 
 # 生成性能测试汇总报告

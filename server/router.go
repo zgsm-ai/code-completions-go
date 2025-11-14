@@ -49,6 +49,7 @@ func SetupRouter() *gin.Engine {
 	api.POST("/completions", completions.Completions)
 	api.POST("/logs", logHandler)
 	api.GET("/stats", statsHandler)
+	api.GET("/details", detailsHandler)
 
 	// 补全接口 - 新版本路径（与客户端脚本保持一致）
 	completionRouter := r.Group("/code-completion")
@@ -101,6 +102,17 @@ func statsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "OK",
 		"data":    stream_controller.Controller.GetStats(),
+	})
+}
+
+func detailsHandler(c *gin.Context) {
+	if stream_controller.Controller == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "disabled"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "OK",
+		"data":    stream_controller.Controller.GetDetails(),
 	})
 }
 
