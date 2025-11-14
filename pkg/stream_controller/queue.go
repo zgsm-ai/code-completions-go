@@ -32,7 +32,8 @@ type QueueManager struct {
 // 创建等待队列管理器
 func NewQueueManager() *QueueManager {
 	return &QueueManager{
-		clients: make(map[string]*CompletionClient),
+		clients:  make(map[string]*CompletionClient),
+		requests: make(map[string]*ClientRequest),
 	}
 }
 
@@ -144,13 +145,18 @@ func (m *QueueManager) GetDetails() map[string]interface{} {
 	activatedClient := 0
 	clients := []map[string]interface{}{}
 	for _, client := range m.clients {
-		clients = append(clients, map[string]interface{}{
-			"client_id":   client.ClientID,
-			"latest":      client.Latest.GetDetails(),
-			"latest_time": client.LatestTime,
-		})
 		if client.Latest != nil {
 			activatedClient++
+			clients = append(clients, map[string]interface{}{
+				"client_id":   client.ClientID,
+				"latest":      client.Latest.GetSummary(),
+				"latest_time": client.LatestTime,
+			})
+		} else {
+			clients = append(clients, map[string]interface{}{
+				"client_id":   client.ClientID,
+				"latest_time": client.LatestTime,
+			})
 		}
 	}
 	requests := []map[string]interface{}{}

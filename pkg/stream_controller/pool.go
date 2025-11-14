@@ -244,7 +244,7 @@ func (m *PoolManager) GetDetails() map[string]interface{} {
 		runnings := []map[string]interface{}{}
 		pool.mutex.RLock()
 		for _, req := range pool.runnings {
-			runnings = append(runnings, req.GetDetails())
+			runnings = append(runnings, req.GetSummary())
 		}
 		poolInfo := map[string]interface{}{
 			"name": pool.cfg.ModelName,
