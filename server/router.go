@@ -27,7 +27,7 @@ func SetupRouter() *gin.Engine {
 	r.Use(gin.Recovery())
 
 	// 健康检查接口
-	r.GET("/health", healthCheck)
+	r.GET("/healthz", healthCheck)
 
 	// Prometheus指标接口
 	r.GET("/metrics", func(c *gin.Context) {
@@ -43,14 +43,12 @@ func SetupRouter() *gin.Engine {
 		c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 		c.Next()
 	})
-	// 示例接口
-	api.GET("/example", exampleHandler)
-	// 补全接口 - 兼容旧版本路径
-	api.POST("/completions", completions.Completions)
 	api.POST("/logs", logHandler)
 	api.GET("/stats", statsHandler)
 	api.GET("/details", detailsHandler)
 
+	// 支持OPENAI标准的补全接口，默认并不开放
+	api.POST("/completions", completions.CompletionsOpenAI)
 	// 补全接口 - 新版本路径（与客户端脚本保持一致）
 	completionRouter := r.Group("/code-completion")
 	completionRouter.Use(func(c *gin.Context) {
@@ -58,6 +56,7 @@ func SetupRouter() *gin.Engine {
 		c.Next()
 	})
 	completionRouter.POST("/api/v1/completions", completions.Completions)
+	completionRouter.POST("/api/v2/completions", completions.CompletionsV2)
 
 	return r
 }
@@ -69,7 +68,7 @@ func SetupRouter() *gin.Engine {
 // @Accept json
 // @Produce json
 // @Success 200 {object} map[string]interface{}
-// @Router /health [get]
+// @Router /healthz [get]
 func healthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok",
@@ -77,39 +76,30 @@ func healthCheck(c *gin.Context) {
 	})
 }
 
-// exampleHandler 示例接口处理器
-// @Summary 示例接口
-// @Description 返回示例数据
-// @Tags example
+// statsHandler 统计信息处理器
+// @Summary 获取统计信息
+// @Description 获取代码补全服务的统计信息
+// @Tags debug
 // @Accept json
 // @Produce json
 // @Success 200 {object} map[string]interface{}
-// @Router /api/example [get]
-func exampleHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Hello, World!",
-		"data": gin.H{
-			"timestamp": time.Now().Unix(),
-		},
-	})
-}
-
+// @Router /api/stats [get]
 func statsHandler(c *gin.Context) {
-	if stream_controller.Controller == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "disabled"})
-		return
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "OK",
 		"data":    stream_controller.Controller.GetStats(),
 	})
 }
 
+// detailsHandler 详细信息处理器
+// @Summary 获取详细信息
+// @Description 获取代码补全服务的详细信息
+// @Tags debug
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /api/details [get]
 func detailsHandler(c *gin.Context) {
-	if stream_controller.Controller == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "disabled"})
-		return
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "OK",
 		"data":    stream_controller.Controller.GetDetails(),
@@ -123,7 +113,7 @@ type LogSettings struct {
 // logHandler 日志级别设置处理器
 // @Summary 设置日志级别
 // @Description 设置应用程序的日志级别
-// @Tags logs
+// @Tags debug
 // @Accept json
 // @Produce json
 // @Param request body LogSettings true "日志级别设置"

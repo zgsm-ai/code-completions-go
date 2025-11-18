@@ -23,8 +23,7 @@ func (in *CompletionInput) Preprocess(c *CompletionContext) *CompletionResponse 
 	// 0. 补全拒绝规则链处理
 	err := NewFilterChain(&config.Config.CompletionsConfig).Handle(&in.CompletionRequest)
 	if err != nil {
-		c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
-		return RejectRequest(in, c.Perf, model.StatusRejected, err)
+		return CancelRequest(in.CompletionID, in.SelectedModel, c.Perf, model.StatusRejected, err)
 	}
 	// 1. 解析请求参数
 	in.GetPrompts()
@@ -53,7 +52,7 @@ func (in *CompletionInput) GetContext(c *CompletionContext) {
 		in.ImportContent,
 		in.Headers,
 	)
-	c.Perf.ContextDuration = time.Since(c.Perf.ReceiveTime)
+	c.Perf.ContextDuration = time.Since(c.Perf.ReceiveTime).Milliseconds()
 }
 
 /**

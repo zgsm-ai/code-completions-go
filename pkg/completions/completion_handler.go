@@ -38,8 +38,7 @@ func NewCompletionHandler(m model.LLM) *CompletionHandler {
 	}
 }
 
-// 处理补全请求
-func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput) *CompletionResponse {
+func (h *CompletionHandler) Adapt(input *CompletionInput) *model.CompletionParameter {
 	// 3. 补全模型相关的前置处理 （拼接prompt策略，单行/多行补全策略，裁剪过长上下文）
 	h.truncatePrompt(h.cfg, &input.Processed)
 
@@ -48,7 +47,7 @@ func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput
 
 	// 5. 交给模型处理
 	var para model.CompletionParameter
-	para.Model = input.Model
+	para.Model = input.SelectedModel
 	para.ClientID = input.ClientID
 	para.CompletionID = input.CompletionID
 	para.Prefix = input.Processed.Prefix
@@ -57,37 +56,35 @@ func (h *CompletionHandler) CallLLM(c *CompletionContext, input *CompletionInput
 	para.Stop = stopWords
 	para.MaxTokens = h.cfg.MaxOutputToken
 	para.Temperature = float32(input.Temperature)
+	return &para
+}
 
+// 处理补全请求
+func (h *CompletionHandler) CallLLM(c *CompletionContext, para *model.CompletionParameter) *CompletionResponse {
 	modelStartTime := time.Now().Local()
-	rsp, verbose, completionStatus, err := h.llm.Completions(c.Ctx, &para)
+	rsp, verbose, completionStatus, err := h.llm.Completions(c.Ctx, para)
 	modelEndTime := time.Now().Local()
-	c.Perf.LLMDuration = modelEndTime.Sub(modelStartTime)
+	c.Perf.LLMDuration = modelEndTime.Sub(modelStartTime).Milliseconds()
 
 	if completionStatus != model.StatusSuccess {
-		c.Perf.PromptTokens = h.getTokensCount(input.Processed.Prefix) + h.getTokensCount(input.Processed.CodeContext)
-		c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
-		return ErrorResponse(input, completionStatus, c.Perf, verbose, err)
+		c.Perf.PromptTokens = h.getTokensCount(para.Prefix) + h.getTokensCount(para.CodeContext)
+		return ErrorResponse(para.CompletionID, para.Model, completionStatus, c.Perf, verbose, err)
 	}
 
-	// 6. 补全后置处理
 	var completionText string
 	if len(rsp.Choices) > 0 {
 		completionText = rsp.Choices[0].Text
 	}
-	if completionText != "" && !h.cfg.DisablePrune {
-		completionText = h.pruneCompletionCode(completionText, para.Prefix, para.Suffix, input.LanguageID)
-	}
 	c.Perf.PromptTokens = rsp.Usage.PromptTokens
 	c.Perf.CompletionTokens = rsp.Usage.CompletionTokens
 	c.Perf.TotalTokens = c.Perf.CompletionTokens + c.Perf.PromptTokens
-	c.Perf.TotalDuration = time.Since(c.Perf.ReceiveTime)
 
 	if completionText == "" {
-		return ErrorResponse(input, model.StatusEmpty, c.Perf, verbose, fmt.Errorf("empty"))
+		return ErrorResponse(para.CompletionID, para.Model, model.StatusEmpty, c.Perf, verbose, fmt.Errorf("empty"))
 	}
 
 	// 7. 构建响应
-	return SuccessResponse(input, completionText, c.Perf, verbose)
+	return SuccessResponse(para.CompletionID, para.Model, completionText, c.Perf, verbose)
 }
 
 // 完整处理补全请求
@@ -96,5 +93,22 @@ func (h *CompletionHandler) HandleCompletion(c *CompletionContext, input *Comple
 	if rsp != nil {
 		return rsp
 	}
-	return h.CallLLM(c, input)
+	para := h.Adapt(input)
+
+	return h.CallLLM(c, para)
+}
+
+// 处理OPENAI标准的补全请求
+func (h *CompletionHandler) HandleCompletionOpenAI(c *CompletionContext, r *model.CompletionRequest) *CompletionResponse {
+	var para model.CompletionParameter
+	para.Model = r.Model
+	para.ClientID = ""
+	para.CompletionID = ""
+	para.Prefix = r.Prompt
+	para.Suffix = r.Suffix
+	para.CodeContext = ""
+	para.Stop = r.Stop
+	para.MaxTokens = min(h.cfg.MaxOutputToken, r.MaxTokens)
+	para.Temperature = float32(r.Temperature)
+	return h.CallLLM(c, &para)
 }

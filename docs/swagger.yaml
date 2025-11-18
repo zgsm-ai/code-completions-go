@@ -3,22 +3,52 @@ definitions:
   completions.CalculateHideScore:
     properties:
       document_length:
+        description: 文档长度
         type: integer
       is_whitespace_after_cursor:
+        description: 光标之后该行是否没有内容(空白除外)
         type: boolean
       prefix:
+        description: 光标前的所有内容
         type: string
       previous_label:
+        description: 上个请求是否被接受
         type: integer
       previous_label_timestamp:
+        description: 上个请求被接受的时间戳
         type: integer
       prompt_end_pos:
+        description: 光标在文档中的偏移
         type: integer
     type: object
   completions.CompletionChoice:
     properties:
       text:
         type: string
+    type: object
+  completions.CompletionPerformance:
+    properties:
+      completion_tokens:
+        type: integer
+      context_duration:
+        description: 获取上下文的时长(毫秒)
+        type: integer
+      llm_duration:
+        description: 调用大语言模型耗用的时长(毫秒)
+        type: integer
+      prompt_tokens:
+        type: integer
+      queue_duration:
+        description: 排队时长(毫秒)
+        type: integer
+      receive_time:
+        description: 收到请求的时间
+        type: string
+      total_duration:
+        description: 总时长(毫秒)
+        type: integer
+      total_tokens:
+        type: integer
     type: object
   completions.CompletionRequest:
     properties:
@@ -28,16 +58,12 @@ definitions:
         $ref: '#/definitions/completions.CalculateHideScore'
       client_id:
         type: string
-      code_path:
-        type: string
       completion_id:
         type: string
       extra:
         additionalProperties: true
         type: object
       file_project_path:
-        type: string
-      git_path:
         type: string
       import_content:
         type: string
@@ -53,8 +79,6 @@ definitions:
         type: string
       prompt_options:
         $ref: '#/definitions/completions.PromptOptions'
-      repo:
-        type: string
       stop:
         items:
           type: string
@@ -63,8 +87,8 @@ definitions:
         type: number
       trigger_mode:
         type: string
-      user_id:
-        type: string
+      verbose:
+        type: boolean
     type: object
   completions.CompletionResponse:
     properties:
@@ -72,34 +96,22 @@ definitions:
         items:
           $ref: '#/definitions/completions.CompletionChoice'
         type: array
-      completion_tokens:
+      created:
         type: integer
+      error:
+        type: string
       id:
         type: string
       model:
         type: string
-      model_choices:
-        items:
-          $ref: '#/definitions/completions.CompletionChoice'
-        type: array
-      model_cost_time:
-        description: ms
-        type: integer
-      model_end_time:
-        type: string
-      model_start_time:
-        description: may null
-        type: string
       object:
-        type: string
-      prompt:
-        type: string
-      prompt_tokens:
-        type: integer
-      request_time:
         type: string
       status:
         $ref: '#/definitions/model.CompletionStatus'
+      usage:
+        $ref: '#/definitions/completions.CompletionPerformance'
+      verbose:
+        $ref: '#/definitions/model.CompletionVerbose'
     type: object
   completions.PromptOptions:
     properties:
@@ -114,40 +126,94 @@ definitions:
       suffix:
         type: string
     type: object
+  model.CompletionParameter:
+    properties:
+      clientID:
+        description: 用户ID，唯一标识发起补全请求的用户
+        type: string
+      completionID:
+        description: 补全请求ID，用于唯一标识一次补全请求
+        type: string
+      context:
+        description: 上下文
+        type: string
+      max_tokens:
+        description: 回复内容的最大token数
+        type: integer
+      model:
+        description: 模型
+        type: string
+      prefix:
+        description: 前缀
+        type: string
+      stop:
+        description: 停止符
+        items:
+          type: string
+        type: array
+      suffix:
+        description: 后缀
+        type: string
+      temperature:
+        description: 温度
+        type: number
+      verbose:
+        description: 是否需要更详细的回复，帮助调试
+        type: boolean
+    type: object
   model.CompletionStatus:
     enum:
-    - sucess
-    - modelError
+    - success
     - reqError
-    - empty
-    - processEmpty
     - serverError
-    - reject
+    - modelError
+    - empty
+    - rejected
     - timeout
+    - canceled
+    - busy
     type: string
     x-enum-comments:
-      CompletionModelError: 模型响应错误
-      CompletionRejected: 根据规则拒绝补全
-      CompletionReqError: 请求存在错误
-      CompletionServerError: 服务端错误
+      StatusBusy: 服务端繁忙
+      StatusCanceled: 用户取消
+      StatusEmpty: 补全结果为空
+      StatusModelError: 模型响应错误
+      StatusRejected: 根据规则拒绝补全
+      StatusReqError: 请求存在错误
+      StatusServerError: 服务端错误
+      StatusSuccess: 补全成功
+      StatusTimeout: 补全请求超时
     x-enum-descriptions:
-    - ""
-    - 模型响应错误
+    - 补全成功
     - 请求存在错误
-    - ""
-    - ""
     - 服务端错误
+    - 模型响应错误
+    - 补全结果为空
     - 根据规则拒绝补全
-    - ""
+    - 补全请求超时
+    - 用户取消
+    - 服务端繁忙
     x-enum-varnames:
-    - CompletionSuccess
-    - CompletionModelError
-    - CompletionReqError
-    - CompletionEmpty
-    - CompletionProcessEmpty
-    - CompletionServerError
-    - CompletionRejected
-    - CompletionTimeout
+    - StatusSuccess
+    - StatusReqError
+    - StatusServerError
+    - StatusModelError
+    - StatusEmpty
+    - StatusRejected
+    - StatusTimeout
+    - StatusCanceled
+    - StatusBusy
+  model.CompletionVerbose:
+    properties:
+      id:
+        type: string
+      input:
+        additionalProperties: true
+        type: object
+      output:
+        additionalProperties: true
+        type: object
+    type: object
   server.LogSettings:
     properties:
       level:
@@ -171,14 +237,14 @@ paths:
     post:
       consumes:
       - application/json
-      description: 根据提供的代码上下文生成代码补全建议
+      description: 根据提供的代码上下文生成代码补全建议（OPENAI协议的请求格式）
       parameters:
       - description: 补全请求
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/completions.CompletionRequest'
+          $ref: '#/definitions/model.CompletionParameter'
       produces:
       - application/json
       responses:
@@ -189,21 +255,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/completions.CompletionResponse'
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties: true
-            type: object
-      summary: 代码补全
+            $ref: '#/definitions/completions.CompletionResponse'
+      summary: openai/completions接口的代码补全
       tags:
       - completions
-  /api/example:
+  /api/details:
     get:
       consumes:
       - application/json
-      description: 返回示例数据
+      description: 获取代码补全服务的详细信息
       produces:
       - application/json
       responses:
@@ -212,9 +276,9 @@ paths:
           schema:
             additionalProperties: true
             type: object
-      summary: 示例接口
+      summary: 获取详细信息
       tags:
-      - example
+      - debug
   /api/logs:
     post:
       consumes:
@@ -242,7 +306,23 @@ paths:
             type: object
       summary: 设置日志级别
       tags:
-      - logs
+      - debug
+  /api/stats:
+    get:
+      consumes:
+      - application/json
+      description: 获取代码补全服务的统计信息
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取统计信息
+      tags:
+      - debug
   /code-completion/api/v1/completions:
     post:
       consumes:
@@ -265,17 +345,45 @@ paths:
         "400":
           description: Bad Request
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/completions.CompletionResponse'
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties: true
-            type: object
-      summary: 代码补全
+            $ref: '#/definitions/completions.CompletionResponse'
+      summary: 兼容千流补全接口的代码补全
       tags:
       - completions
-  /health:
+  /code-completion/api/v2/completions:
+    post:
+      consumes:
+      - application/json
+      description: 根据提供的代码上下文生成代码补全建议，该接口使用sangfor/completions接口，请求参数在客户端已经被预处理过了
+      parameters:
+      - description: 补全请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/model.CompletionParameter'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/completions.CompletionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/completions.CompletionResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/completions.CompletionResponse'
+      summary: sangfor/completions接口的代码补全
+      tags:
+      - completions
+  /healthz:
     get:
       consumes:
       - application/json

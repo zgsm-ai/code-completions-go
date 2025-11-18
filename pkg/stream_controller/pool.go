@@ -5,6 +5,7 @@ import (
 	"code-completion/pkg/config"
 	"code-completion/pkg/metrics"
 	"code-completion/pkg/model"
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -137,11 +138,12 @@ func (m *PoolManager) SelectIdlestPool(modelName string) *ModelPool {
 
 // 等待模型池空闲处理请求
 func (m *PoolManager) WaitDoRequest(req *ClientRequest) *completions.CompletionResponse {
-	pool := m.SelectIdlestPool(req.Input.SelectedModel)
+	pool := m.SelectIdlestPool(req.Para.Model)
 	if pool == nil {
 		req.Canceled = true
-		return completions.RejectRequest(req.Input, &req.Perf, model.StatusBusy, fmt.Errorf("model pool busy, request rejected"))
+		return completions.CancelRequest(req.Para.CompletionID, req.Para.Model, req.Perf, model.StatusBusy, fmt.Errorf("model pool busy, request rejected"))
 	}
+	req.Para.Model = pool.cfg.ModelName
 	// 尝试将请求发送到ModelPool的waits通道，如果不能立即发送则失败
 	select {
 	case pool.waits <- req: // 成功将请求发送到waits通道
@@ -150,17 +152,21 @@ func (m *PoolManager) WaitDoRequest(req *ClientRequest) *completions.CompletionR
 		case rsp := <-req.rspChan:
 			return rsp
 		case <-req.ctx.Done():
+			status := model.StatusTimeout
+			if req.ctx.Err() == context.Canceled {
+				status = model.StatusCanceled
+			}
 			req.Canceled = true
-			return completions.CancelRequest(req.Input, &req.Perf, req.ctx.Err())
+			return completions.CancelRequest(req.Para.CompletionID, req.Para.Model, req.Perf, status, req.ctx.Err())
 		}
 	default: // waits通道已满，无法立即发送请求
 		zap.L().Debug("Model pool busy, failed to send request",
-			zap.String("model", req.Input.Model),
-			zap.String("clientID", req.Input.ClientID),
-			zap.String("completionID", req.Input.CompletionID))
-		req.Perf.QueueDuration = time.Since(req.Perf.EnqueueTime)
+			zap.String("model", req.Para.Model),
+			zap.String("clientID", req.Para.ClientID),
+			zap.String("completionID", req.Para.CompletionID))
+		req.Perf.QueueDuration = time.Since(req.Perf.EnqueueTime).Milliseconds()
 		req.Canceled = true
-		return completions.RejectRequest(req.Input, &req.Perf, model.StatusBusy,
+		return completions.CancelRequest(req.Para.CompletionID, req.Para.Model, req.Perf, model.StatusBusy,
 			fmt.Errorf("model pool busy, request rejected"))
 	}
 }
@@ -179,18 +185,18 @@ func (m *PoolManager) LoopDoRequest(pool *ModelPool) {
 		case req.rspChan <- rsp:
 		default:
 			zap.L().Error("Failed to send response to client",
-				zap.String("completionID", req.Input.CompletionID))
+				zap.String("completionID", req.Para.CompletionID))
 		}
 	}
 }
 
 // 执行请求，调用补全模型
 func (m *PoolManager) doRequest(pool *ModelPool, req *ClientRequest) *completions.CompletionResponse {
-	req.Perf.QueueDuration = time.Since(req.Perf.EnqueueTime)
+	req.Perf.QueueDuration = time.Since(req.Perf.EnqueueTime).Milliseconds()
 
 	// 增加活跃请求计数
 	pool.mutex.Lock()
-	pool.runnings[req.Input.CompletionID] = req
+	pool.runnings[req.Para.CompletionID] = req
 	currentRequests := len(pool.runnings)
 	pool.mutex.Unlock()
 
@@ -198,11 +204,11 @@ func (m *PoolManager) doRequest(pool *ModelPool, req *ClientRequest) *completion
 
 	// 使用原有的补全处理器处理请求
 	handler := completions.NewCompletionHandler(pool.llm)
-	c := completions.NewCompletionContext(req.ctx, &req.Perf)
-	rsp := handler.CallLLM(c, req.Input)
+	c := completions.NewCompletionContext(req.ctx, req.Perf)
+	rsp := handler.CallLLM(c, req.Para)
 
 	pool.mutex.Lock()
-	delete(pool.runnings, req.Input.CompletionID)
+	delete(pool.runnings, req.Para.CompletionID)
 	currentRequests = len(pool.runnings)
 	pool.mutex.Unlock()
 

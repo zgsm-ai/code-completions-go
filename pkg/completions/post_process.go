@@ -300,8 +300,8 @@ func (p *SyntaxErrorDiscarder) Name() string {
 type SyntaxErrorCutter struct{ Cutter }
 
 func (p *SyntaxErrorCutter) Process(ctx *PostprocessorContext) bool {
-	// 使用 TreeSitter 进行语法错误拦截和代码裁剪
-	tsUtil := NewTreeSitterUtil(ctx.Language)
+	// 进行语法错误拦截和代码裁剪
+	tsUtil := NewSimpleParser(ctx.Language)
 	if tsUtil == nil {
 		return false
 	}
@@ -320,7 +320,7 @@ func (p *SyntaxErrorCutter) Name() string {
 
 // isCodeSyntax 检查代码语法是否正确
 func isCodeSyntax(language, code, prefix, suffix string) bool {
-	tsUtil := NewTreeSitterUtil(language)
+	tsUtil := NewSimpleParser(language)
 	if tsUtil == nil {
 		return true
 	}

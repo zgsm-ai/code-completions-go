@@ -4,6 +4,7 @@ import (
 	"code-completion/pkg/completions"
 	"code-completion/pkg/config"
 	"code-completion/pkg/metrics"
+	"code-completion/pkg/model"
 	"context"
 	"sync"
 	"time"
@@ -38,26 +39,27 @@ func NewQueueManager() *QueueManager {
 }
 
 // 添加请求到等待队列
-func (m *QueueManager) AddRequest(ctx context.Context, input *completions.CompletionInput) *ClientRequest {
+func (m *QueueManager) AddRequest(ctx context.Context, para *model.CompletionParameter, perf *completions.CompletionPerformance) *ClientRequest {
 	reqCtx, cancel := context.WithTimeout(ctx, config.Config.StreamController.CompletionTimeout)
 	req := &ClientRequest{
-		Input:    input,
+		Para:     para,
+		Perf:     perf,
 		Canceled: false,
 		ctx:      reqCtx,
 		cancel:   cancel,
 		rspChan:  make(chan *completions.CompletionResponse, 1),
 	}
-	req.Perf.ReceiveTime = time.Now().Local()
+	req.Perf.EnqueueTime = time.Now().Local()
 
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	client, exists := m.clients[input.ClientID]
+	client, exists := m.clients[para.ClientID]
 	if !exists {
 		client = &CompletionClient{
-			ClientID: input.ClientID,
+			ClientID: para.ClientID,
 		}
-		m.clients[input.ClientID] = client
+		m.clients[para.ClientID] = client
 	}
 	client.LatestTime = req.Perf.ReceiveTime
 	if client.Latest != nil {
@@ -66,7 +68,7 @@ func (m *QueueManager) AddRequest(ctx context.Context, input *completions.Comple
 	}
 	client.Latest = req
 
-	m.requests[input.ClientID+input.CompletionID] = req
+	m.requests[para.ClientID+para.CompletionID] = req
 	metrics.UpdateCompletionConcurrent(len(m.requests))
 	return req
 }
@@ -75,10 +77,10 @@ func (m *QueueManager) RemoveRequest(req *ClientRequest) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	delete(m.requests, req.Input.ClientID+req.Input.CompletionID)
+	delete(m.requests, req.Para.ClientID+req.Para.CompletionID)
 	metrics.UpdateCompletionConcurrent(len(m.requests))
 
-	queue, exists := m.clients[req.Input.ClientID]
+	queue, exists := m.clients[req.Para.ClientID]
 	if !exists {
 		return
 	}
@@ -90,8 +92,8 @@ func (m *QueueManager) RemoveRequest(req *ClientRequest) {
 // 取消现有请求
 func (m *QueueManager) cancelRequest(req *ClientRequest) {
 	zap.L().Debug("Cancel request",
-		zap.String("clientID", req.Input.ClientID),
-		zap.String("completionID", req.Input.CompletionID))
+		zap.String("clientID", req.Para.ClientID),
+		zap.String("completionID", req.Para.CompletionID))
 	if req.cancel != nil {
 		req.cancel()
 	}

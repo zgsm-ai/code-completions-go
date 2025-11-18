@@ -1,13 +1,14 @@
 FROM golang:1.24.0 AS builder
 WORKDIR /app
+
 COPY go.mod go.sum ./
+
+RUN go env -w CGO_ENABLED=0 && \
+    go env -w GO111MODULE=on && \
+    go env -w GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct
 RUN go mod download && go mod verify
 
 COPY . .
-
-RUN go env -w CGO_ENABLED=1 && \
-    go env -w GO111MODULE=on && \
-    go env -w GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct
 
 ARG VERSION=v1.7.76
 RUN go build -ldflags="-s -w -X 'main.SoftwareVer=$VERSION'" -o code-completion *.go

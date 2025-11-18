@@ -43,41 +43,59 @@ func (sc *StreamController) Init() {
 
 // 处理补全请求
 func (sc *StreamController) ProcessCompletionRequest(ctx context.Context, input *completions.CompletionInput) *completions.CompletionResponse {
-	if input.ClientID == "" { // 如果无法获取客户端ID，使用默认处理方式
-		return sc.processWithoutStreamControl(ctx, input)
+	var perf completions.CompletionPerformance
+	perf.ReceiveTime = time.Now().Local()
+	// 如果无法获取到clientID和completionID，拒掉
+	if input.ClientID == "" || input.CompletionID == "" {
+		return completions.CancelRequest(input.CompletionID, input.Model, &perf, model.StatusRejected, fmt.Errorf("missing client id or completion id"))
 	}
-
-	// 将请求添加到客户端队列，获取包含响应通道的ClientRequest
-	req := sc.queues.AddRequest(ctx, input)
+	//	预选模型池
 	pool := sc.pools.SelectIdlestPool(input.Model)
 	if pool == nil {
-		req.Input.SelectedModel = input.Model
-		return completions.RejectRequest(req.Input, &req.Perf, model.StatusBusy, fmt.Errorf("model pool busy, cancel request"))
+		return completions.CancelRequest(input.CompletionID, input.Model, &perf, model.StatusBusy, fmt.Errorf("model pool busy, cancel request"))
 	}
-	req.Input.SelectedModel = pool.cfg.ModelName
-	defer func() {
-		sc.queues.RemoveRequest(req)
-	}()
+	input.SelectedModel = pool.cfg.ModelName
 
-	c := completions.NewCompletionContext(req.ctx, &req.Perf)
+	//	上下文预处理
+	c := completions.NewCompletionContext(ctx, &perf)
 	rsp := input.Preprocess(c)
 	if rsp != nil {
 		return rsp
 	}
-	req.Perf.EnqueueTime = time.Now().Local()
+	//	请求数据针对模型进行适应性改造
+	handler := completions.NewCompletionHandler(pool.llm)
+	para := handler.Adapt(input)
 
+	// 将请求添加到客户端队列，获取包含响应通道的ClientRequest
+	req := sc.queues.AddRequest(ctx, para, &perf)
+	defer func() {
+		sc.queues.RemoveRequest(req)
+	}()
 	return sc.pools.WaitDoRequest(req)
 }
 
-// 不使用流控的处理方式
-func (sc *StreamController) processWithoutStreamControl(ctx context.Context, input *completions.CompletionInput) *completions.CompletionResponse {
+func (sc *StreamController) ProcessCompletionV2(ctx context.Context, para *model.CompletionParameter) *completions.CompletionResponse {
+	var perf completions.CompletionPerformance
+	perf.ReceiveTime = time.Now().Local()
+
+	req := sc.queues.AddRequest(ctx, para, &perf)
+	defer func() {
+		sc.queues.RemoveRequest(req)
+	}()
+	return sc.pools.WaitDoRequest(req)
+}
+
+func (sc *StreamController) ProcessCompletionOpenAI(ctx context.Context, r *model.CompletionRequest) *completions.CompletionResponse {
+	var perf completions.CompletionPerformance
+	perf.ReceiveTime = time.Now().Local()
+
 	pool := sc.pools.findIdlestPool(sc.pools.all)
-	handler := completions.NewCompletionHandler(pool.llm)
-	perf := &completions.CompletionPerformance{
-		ReceiveTime: time.Now().Local(),
+	if pool == nil {
+		return completions.CancelRequest("", r.Model, &perf, model.StatusBusy, fmt.Errorf("model pool busy, cancel request"))
 	}
-	c := completions.NewCompletionContext(ctx, perf)
-	return handler.HandleCompletion(c, input)
+	handler := completions.NewCompletionHandler(pool.llm)
+	c := completions.NewCompletionContext(ctx, &perf)
+	return handler.HandleCompletionOpenAI(c, r)
 }
 
 // 启动定期维护的协程

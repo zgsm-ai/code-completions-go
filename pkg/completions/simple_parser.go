@@ -1,82 +1,32 @@
 package completions
 
 import (
-	"fmt"
 	"strings"
-	"time"
 
-	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.uber.org/zap"
 )
 
-// TreeSitterUtil TreeSitter工具结构体
-type TreeSitterUtil struct {
+type SimpleParser struct {
 	language string
-	parser   *sitter.Parser
-	lang     *sitter.Language
 	logger   *zap.Logger
 }
 
-// NewTreeSitterUtil 创建TreeSitter工具实例
-func NewTreeSitterUtil(language string) *TreeSitterUtil {
-	ts := &TreeSitterUtil{
+func NewSimpleParser(language string) *SimpleParser {
+	ts := &SimpleParser{
 		language: language,
-		logger:   zap.L().With(zap.String("component", "TreeSitterUtil")),
+		logger:   zap.L().With(zap.String("component", "SimpleParser")),
 	}
-
-	// 暂时使用基本的语法检查，后续可以扩展为真正的tree-sitter解析
-	// 初始化parser
-	ts.parser = sitter.NewParser()
-
-	// TODO: 这里需要根据不同的语言加载对应的tree-sitter语法
-	// 由于Go版本的tree-sitter语言绑定比较复杂，暂时使用基本的语法检查
-	// 后续可以通过CGO或者外部库来加载真正的tree-sitter语言解析器
-
 	return ts
 }
 
-// calculateTime 计算函数执行时间的装饰器
-func (t *TreeSitterUtil) calculateTime(funcName string, start time.Time) {
-	duration := time.Since(start)
-	t.logger.Info(fmt.Sprintf("函数 %s 的执行耗时为: %v", funcName, duration))
-}
-
 // IsCodeSyntax 检查代码语法
-func (t *TreeSitterUtil) IsCodeSyntax(code string) bool {
-	// 如果没有真正的tree-sitter语言解析器，使用基本的语法检查
-	if t.lang == nil {
-		return t.basicSyntaxCheck(code)
-	}
-
-	// 将代码转换为[]byte
-	codeBytes := []byte(code)
-
-	// 解析代码
-	tree := t.parser.Parse(codeBytes, nil)
-	if tree == nil {
-		t.logger.Warn("解析代码失败", zap.String("language", t.language))
-		return false
-	}
-	defer tree.Close()
-
-	rootNode := tree.RootNode()
-	hasError := rootNode.HasError()
-
-	// 对于Lua语言，需要执行两次才能识别正确（根据Python版本的注释）
-	if strings.ToLower(t.language) == "lua" {
-		tree2 := t.parser.Parse(codeBytes, nil)
-		if tree2 != nil {
-			defer tree2.Close()
-			rootNode2 := tree2.RootNode()
-			hasError = rootNode2.HasError()
-		}
-	}
-
-	return !hasError
+func (t *SimpleParser) IsCodeSyntax(code string) bool {
+	// 使用基本的语法检查
+	return t.basicSyntaxCheck(code)
 }
 
 // basicSyntaxCheck 基本的语法检查
-func (t *TreeSitterUtil) basicSyntaxCheck(code string) bool {
+func (t *SimpleParser) basicSyntaxCheck(code string) bool {
 	switch strings.ToLower(t.language) {
 	case "python":
 		return t.checkPythonSyntax(code)
@@ -92,7 +42,7 @@ func (t *TreeSitterUtil) basicSyntaxCheck(code string) bool {
 /**
  * 拦截语法错误代码
  */
-func (t *TreeSitterUtil) InterceptSyntaxErrorCode(choicesText, prefix, suffix string) string {
+func (t *SimpleParser) InterceptSyntaxErrorCode(choicesText, prefix, suffix string) string {
 	if choicesText == "" {
 		return choicesText
 	}
@@ -125,7 +75,7 @@ func (t *TreeSitterUtil) InterceptSyntaxErrorCode(choicesText, prefix, suffix st
 }
 
 // interceptPythonSyntaxError 拦截Python语法错误
-func (t *TreeSitterUtil) interceptPythonSyntaxError(choicesText, prefix, suffix string) string {
+func (t *SimpleParser) interceptPythonSyntaxError(choicesText, prefix, suffix string) string {
 	lines := strings.Split(choicesText, "\n")
 	var validLines []string
 
@@ -166,7 +116,7 @@ func (t *TreeSitterUtil) interceptPythonSyntaxError(choicesText, prefix, suffix 
 }
 
 // interceptJavaScriptSyntaxError 拦截JavaScript语法错误
-func (t *TreeSitterUtil) interceptJavaScriptSyntaxError(choicesText, prefix, suffix string) string {
+func (t *SimpleParser) interceptJavaScriptSyntaxError(choicesText, prefix, suffix string) string {
 	lines := strings.Split(choicesText, "\n")
 	var validLines []string
 
@@ -204,7 +154,7 @@ func (t *TreeSitterUtil) interceptJavaScriptSyntaxError(choicesText, prefix, suf
 }
 
 // checkPythonSyntax 检查Python语法
-func (t *TreeSitterUtil) checkPythonSyntax(code string) bool {
+func (t *SimpleParser) checkPythonSyntax(code string) bool {
 	lines := strings.Split(code, "\n")
 	indentStack := []int{0}
 
@@ -243,7 +193,7 @@ func (t *TreeSitterUtil) checkPythonSyntax(code string) bool {
 }
 
 // checkJavaScriptSyntax 检查JavaScript语法
-func (t *TreeSitterUtil) checkJavaScriptSyntax(code string) bool {
+func (t *SimpleParser) checkJavaScriptSyntax(code string) bool {
 	bracketCount := 0
 	parenCount := 0
 	bracketSquareCount := 0
@@ -278,7 +228,7 @@ func (t *TreeSitterUtil) checkJavaScriptSyntax(code string) bool {
 }
 
 // checkGoSyntax 检查Go语法
-func (t *TreeSitterUtil) checkGoSyntax(code string) bool {
+func (t *SimpleParser) checkGoSyntax(code string) bool {
 	bracketCount := 0
 	parenCount := 0
 	bracketSquareCount := 0
@@ -313,14 +263,14 @@ func (t *TreeSitterUtil) checkGoSyntax(code string) bool {
 }
 
 // ExtractBlockPrefixSuffix 提取代码块前后缀
-func (t *TreeSitterUtil) ExtractBlockPrefixSuffix(choicesText, prefix, suffix string) (string, string) {
+func (t *SimpleParser) ExtractBlockPrefixSuffix(choicesText, prefix, suffix string) (string, string) {
 	// 简化实现：基于基本的代码块规则提取前后缀
 	// 在实际应用中，这里应该使用TreeSitter进行真正的语法分析
 	return t.extractSimpleBlockPrefixSuffix(choicesText, prefix, suffix)
 }
 
 // extractSimpleBlockPrefixSuffix 简化的代码块前后缀提取
-func (t *TreeSitterUtil) extractSimpleBlockPrefixSuffix(choicesText, prefix, suffix string) (string, string) {
+func (t *SimpleParser) extractSimpleBlockPrefixSuffix(choicesText, prefix, suffix string) (string, string) {
 	const specialMiddleSignal = "<special-middle>"
 	code := prefix + specialMiddleSignal + choicesText + specialMiddleSignal + suffix
 
@@ -338,7 +288,7 @@ func (t *TreeSitterUtil) extractSimpleBlockPrefixSuffix(choicesText, prefix, suf
 }
 
 // ExtractAccurateBlockPrefixSuffix 提取准确的代码块前后缀
-func (t *TreeSitterUtil) ExtractAccurateBlockPrefixSuffix(prefix, suffix string) (string, string) {
+func (t *SimpleParser) ExtractAccurateBlockPrefixSuffix(prefix, suffix string) (string, string) {
 	const specialMiddleSignal = "<special-middle>"
 	code := prefix + specialMiddleSignal + suffix
 	lineNum, _ := getChoicesTextLineNumber(code, specialMiddleSignal)
@@ -359,34 +309,13 @@ func (t *TreeSitterUtil) ExtractAccurateBlockPrefixSuffix(prefix, suffix string)
 }
 
 // FindNearestBlock 查找最近的代码块
-func (t *TreeSitterUtil) FindNearestBlock(code string, startNumber, endNumber int) string {
-	// 如果没有真正的tree-sitter语言解析器，使用简化的实现
-	if t.lang == nil {
-		return t.findNearestBlockSimple(code, startNumber, endNumber)
-	}
-
-	// 使用tree-sitter进行真正的代码块查找
-	codeBytes := []byte(code)
-	tree := t.parser.Parse(codeBytes, nil)
-	if tree == nil {
-		t.logger.Warn("解析代码失败", zap.String("language", t.language))
-		return code
-	}
-	defer tree.Close()
-
-	rootNode := tree.RootNode()
-
-	// 使用DFS遍历查找包含指定行号范围的完整block
-	block := t.traverseForBlock(rootNode, startNumber, endNumber, 3)
-	if block != nil {
-		return t.GetNodeText(code, block)
-	}
-
-	return code
+func (t *SimpleParser) FindNearestBlock(code string, startNumber, endNumber int) string {
+	// 使用简化的实现
+	return t.findNearestBlockSimple(code, startNumber, endNumber)
 }
 
 // findNearestBlockSimple 简化的代码块查找
-func (t *TreeSitterUtil) findNearestBlockSimple(code string, startNumber, endNumber int) string {
+func (t *SimpleParser) findNearestBlockSimple(code string, startNumber, endNumber int) string {
 	lines := strings.Split(code, "\n")
 	if startNumber >= 0 && startNumber < len(lines) && endNumber >= 0 && endNumber < len(lines) {
 		blockLines := lines[startNumber : endNumber+1]
@@ -395,77 +324,14 @@ func (t *TreeSitterUtil) findNearestBlockSimple(code string, startNumber, endNum
 	return code
 }
 
-// traverseForBlock DFS遍历查找包含指定行号范围的完整block
-func (t *TreeSitterUtil) traverseForBlock(node *sitter.Node, startNumber, endNumber int, depth int) *sitter.Node {
-	if depth == 0 {
-		return nil
-	}
-
-	// 获取节点的起始和结束位置
-	startPoint := node.StartPosition()
-	endPoint := node.EndPosition()
-
-	// 检查当前节点是否包含指定的行号范围
-	if startPoint.Row <= uint(startNumber) && endPoint.Row >= uint(endNumber) {
-		// 遍历子节点
-		childCount := node.ChildCount()
-		for i := uint(0); i < childCount; i++ {
-			child := node.Child(i)
-			if child == nil {
-				continue
-			}
-
-			result := t.traverseForBlock(child, startNumber, endNumber, depth-1)
-			if result != nil {
-				return result
-			}
-		}
-		return node
-	}
-
-	return nil
-}
-
 // FindSecondLevelNodeByLineNum 按行号查找第二层节点
-func (t *TreeSitterUtil) FindSecondLevelNodeByLineNum(code string, lineNum int) string {
-	// 如果没有真正的tree-sitter语言解析器，使用简化的实现
-	if t.lang == nil {
-		return t.findSecondLevelNodeByLineNumSimple(code, lineNum)
-	}
-
-	// 使用tree-sitter进行真正的节点查找
-	codeBytes := []byte(code)
-	tree := t.parser.Parse(codeBytes, nil)
-	if tree == nil {
-		t.logger.Warn("解析代码失败", zap.String("language", t.language))
-		return ""
-	}
-	defer tree.Close()
-
-	rootNode := tree.RootNode()
-
-	// 遍历第二层节点
-	childCount := rootNode.ChildCount()
-	for i := uint(0); i < childCount; i++ {
-		child := rootNode.Child(i)
-		if child == nil {
-			continue
-		}
-
-		startPoint := child.StartPosition()
-		endPoint := child.EndPosition()
-
-		// 检查子节点是否包含指定行号
-		if startPoint.Row <= uint(lineNum) && endPoint.Row >= uint(lineNum) {
-			return t.GetNodeText(code, child)
-		}
-	}
-
-	return ""
+func (t *SimpleParser) FindSecondLevelNodeByLineNum(code string, lineNum int) string {
+	// 使用简化的实现
+	return t.findSecondLevelNodeByLineNumSimple(code, lineNum)
 }
 
 // findSecondLevelNodeByLineNumSimple 简化的第二层节点查找
-func (t *TreeSitterUtil) findSecondLevelNodeByLineNumSimple(code string, lineNum int) string {
+func (t *SimpleParser) findSecondLevelNodeByLineNumSimple(code string, lineNum int) string {
 	lines := strings.Split(code, "\n")
 	if lineNum >= 0 && lineNum < len(lines) {
 		return lines[lineNum]
@@ -474,62 +340,13 @@ func (t *TreeSitterUtil) findSecondLevelNodeByLineNumSimple(code string, lineNum
 }
 
 // FindSecondLevelNearestNodeByLineNum 查找指定行号的最近节点
-func (t *TreeSitterUtil) FindSecondLevelNearestNodeByLineNum(code string, lineNum int) (string, string) {
-	// 如果没有真正的tree-sitter语言解析器，使用简化的实现
-	if t.lang == nil {
-		return t.findSecondLevelNearestNodeByLineNumSimple(code, lineNum)
-	}
-
-	// 使用tree-sitter进行真正的节点查找
-	codeBytes := []byte(code)
-	tree := t.parser.Parse(codeBytes, nil)
-	if tree == nil {
-		t.logger.Warn("解析代码失败", zap.String("language", t.language))
-		return "", ""
-	}
-	defer tree.Close()
-
-	rootNode := tree.RootNode()
-
-	var prefixNode, suffixNode *sitter.Node
-
-	// 遍历第二层节点，找到前一个和后一个节点
-	childCount := rootNode.ChildCount()
-	for i := uint(0); i < childCount; i++ {
-		child := rootNode.Child(i)
-		if child == nil || child.HasError() {
-			continue
-		}
-
-		endPoint := child.EndPosition()
-		startPoint := child.StartPosition()
-
-		// 找到前一个节点（在指定行号之前的节点）
-		if endPoint.Row < uint(lineNum) {
-			prefixNode = child
-		}
-
-		// 找到后一个节点（在指定行号之后的节点）
-		if startPoint.Row > uint(lineNum) {
-			suffixNode = child
-			break // 找到第一个后置节点就停止
-		}
-	}
-
-	// 提取节点文本
-	var prefixText, suffixText string
-	if prefixNode != nil {
-		prefixText = t.GetNodeText(code, prefixNode)
-	}
-	if suffixNode != nil {
-		suffixText = t.GetNodeText(code, suffixNode)
-	}
-
-	return prefixText, suffixText
+func (t *SimpleParser) FindSecondLevelNearestNodeByLineNum(code string, lineNum int) (string, string) {
+	// 使用简化的实现
+	return t.findSecondLevelNearestNodeByLineNumSimple(code, lineNum)
 }
 
 // findSecondLevelNearestNodeByLineNumSimple 简化的最近节点查找
-func (t *TreeSitterUtil) findSecondLevelNearestNodeByLineNumSimple(code string, lineNum int) (string, string) {
+func (t *SimpleParser) findSecondLevelNearestNodeByLineNumSimple(code string, lineNum int) (string, string) {
 	lines := strings.Split(code, "\n")
 	var prefixNode, suffixNode string
 
@@ -542,7 +359,7 @@ func (t *TreeSitterUtil) findSecondLevelNearestNodeByLineNumSimple(code string, 
 }
 
 // GetLastKLineStrLen 获取代码最后k行字符串长度
-func (t *TreeSitterUtil) GetLastKLineStrLen(code string, k int) int {
+func (t *SimpleParser) GetLastKLineStrLen(code string, k int) int {
 	lines := strings.Split(code, "\n")
 	var lastKLines []string
 
@@ -599,40 +416,6 @@ func isolatedPrefixSuffix(code, pattern string) (string, string) {
 	}
 
 	return "", ""
-}
-
-// GetNodeText 获取节点的文本内容
-func (t *TreeSitterUtil) GetNodeText(sourceCode string, node *sitter.Node) string {
-	if node == nil {
-		return ""
-	}
-
-	// 将源代码转换为[]byte
-	sourceBytes := []byte(sourceCode)
-
-	// 获取节点的起始和结束字节位置
-	startByte := node.StartByte()
-	endByte := node.EndByte()
-
-	// 确保字节范围在有效范围内
-	if startByte < 0 || int(endByte) > len(sourceBytes) || startByte > endByte {
-		return ""
-	}
-
-	// 提取节点文本
-	nodeText := sourceBytes[startByte:endByte]
-	return string(nodeText)
-}
-
-// GetText 获取节点的文本内容（简化版本）
-func (t *TreeSitterUtil) GetText(node *sitter.Node) string {
-	if node == nil {
-		return ""
-	}
-
-	// 由于tree-sitter Go库可能没有Text方法，我们使用一个简化的实现
-	// 在实际使用中，可能需要通过源代码和节点位置来提取文本
-	return "node_text_placeholder"
 }
 
 // max 返回两个整数中的较大值
