@@ -249,15 +249,15 @@ for filepath in $file_list; do
             prompt_tokens=$(jq -r '.usage.prompt_tokens // "N/A"' "$response_file" 2>/dev/null)
             completion_tokens=$(jq -r '.usage.completion_tokens // "N/A"' "$response_file" 2>/dev/null)
             
-            # 从usage.total_duration中提取总持续时间（单位是纳秒，需要转换为毫秒）
-            total_duration_ns=$(jq -r '.usage.total_duration // "N/A"' "$response_file" 2>/dev/null)
+            # 从usage.total_duration中提取总持续时间（单位是毫秒）
+            total_duration_ms=$(jq -r '.usage.total_duration // "N/A"' "$response_file" 2>/dev/null)
             
             # 处理null值和单位转换
-            if [ "$total_duration_ns" = "null" ] || [ -z "$total_duration_ns" ] || [ "$total_duration_ns" = "N/A" ]; then
+            if [ "$total_duration_ms" = "null" ] || [ -z "$total_duration_ms" ] || [ "$total_duration_ms" = "N/A" ]; then
                 total_duration="N/A"
             else
                 # 将纳秒转换为毫秒（除以1,000,000）
-                total_duration=$(echo "scale=2; $total_duration_ns / 1000000" | bc 2>/dev/null || echo "N/A")
+                total_duration=$total_duration_ms
                 # 累加有效响应时间（总体和状态特定）
                 total_time_sum=$(echo "$total_time_sum + $total_duration" | bc 2>/dev/null || echo "$total_time_sum")
                 status_time_sum[$status]=$(echo "${status_time_sum[$status]} + $total_duration" | bc 2>/dev/null || echo "${status_time_sum[$status]}")
