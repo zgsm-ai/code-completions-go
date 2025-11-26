@@ -17,6 +17,7 @@ LANGUAGE_ID=""
 STREAM=""
 TRIGGER_MODE=""
 NO_DEBUG=""
+PROTOCOL_V2=""
 VERBOSE=""
 OUTPUT=""
 
@@ -80,10 +81,11 @@ function print_help() {
   echo "  -s: 开启流式输出"
   echo "  -n: 不输出调试信息"
   echo "  -v: 开启verbose模式"
+  echo "  -2: 启用V2版本协议"
   echo "  -h: 帮助"
 }
 # 初始化选项
-while getopts "a:p:d:f:F:k:m:i:c:P:C:l:t:M:r:o:nsvh" opt; do
+while getopts "a:p:d:f:F:k:m:i:c:P:C:l:t:M:r:o:nsv2h" opt; do
   case "$opt" in
     a)
       ADDR="$OPTARG"
@@ -139,6 +141,9 @@ while getopts "a:p:d:f:F:k:m:i:c:P:C:l:t:M:r:o:nsvh" opt; do
     v)
       VERBOSE="true"
       ;;
+    2)
+      PROTOCOL_V2="true"
+      ;;
     o)
       OUTPUT="$OPTARG"
       ;;
@@ -154,7 +159,7 @@ while getopts "a:p:d:f:F:k:m:i:c:P:C:l:t:M:r:o:nsvh" opt; do
   esac
 done
 
-TEMP='{
+DATA_V1='{
   "model": "DeepSeek-Coder-V2-Lite-Base",
   "prompt": "#!/usr/bin/env python\n# coding: utf-8\nimport time\nimport base64\ndef trace(rsp):\n    print",
   "temperature": 0.1,
@@ -171,19 +176,49 @@ TEMP='{
   "completion_id": "666-94131415"
 }'
 
+DATA_V2='{
+  "model": "DeepSeek-Coder-V2-Lite-Base",
+  "temperature": 0.1,
+  "max_tokens": 50,
+  "stop": [],
+  "beta_mode": false,
+  "stream": false,
+  "verbose": false,
+  "language_id": "python",
+  "trigger_mode": "manual",
+  "project_path": "'"$PWD"'",
+  "file_project_path": "test.py",
+  "client_id": "zbc-test",
+  "completion_id": "666-94131415",
+  "prompt_options": {
+    "prefix": "#!/usr/bin/env python\n# coding: utf-8\nimport time\nimport base64\ndef trace(rsp):\n    print",
+    "suffix": ""
+  }
+}'
+
+# 设定消息BODY的样板
 if [ X"$DFILE" != X"" ]; then
   DATA="$(cat $DFILE)"
+elif [ X"$PROTOCOL_V2" == X"true" ]; then
+  DATA="$DATA_V2"
 elif [ X"$DATA" == X"" ]; then
-  DATA="$TEMP"
+  DATA="$DATA_V1"
 fi
 
+# 补全消息的提示词部分
 if [ X"$PROMPT" != X"" ]; then
-  DATA=`jq --arg newValue "$PROMPT" '.prompt = $newValue' <<< "$DATA"`
+  if [ X"$PROTOCOL_V2" == X"true" ]; then
+    DATA=`jq --arg newValue "$PROMPT" '.prompt_options.prefix = $newValue' <<< "$DATA"`
+  else
+    DATA=`jq --arg newValue "$PROMPT" '.prompt = $newValue' <<< "$DATA"`
+  fi
 elif [ X"$PFILE" != X"" ]; then
   # 检查文件是否包含FIM标记
   if grep -q "<｜fim▁hole｜>" "$PFILE" 2>/dev/null; then
     # 使用FIM解析函数
     parse_fim_file "$PFILE"
+  elif [ X"$PROTOCOL_V2" == X"true" ]; then
+    DATA=`jq --arg newValue "$(cat $PFILE)" '.prompt_options.prefix = $newValue' <<< "$DATA"`
   else
     # 使用原有逻辑，将整个文件内容作为prompt
     DATA=`jq --arg newValue "$(cat $PFILE)" '.prompt = $newValue' <<< "$DATA"`

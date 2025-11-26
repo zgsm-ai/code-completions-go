@@ -21,7 +21,10 @@ import (
 func CompletionsV2(c *gin.Context) {
 	var para model.CompletionParameter
 	if err := c.ShouldBindJSON(&para); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": model.StatusReqError,
+			"error":  err.Error(),
+		})
 		return
 	}
 	rsp := stream_controller.Controller.ProcessCompletionV2(c.Request.Context(), &para)

@@ -17,6 +17,7 @@ class FakeShutdownEvent(object):
     def isSet():
         "Dummy method to always return false"""
         return False
+    <｜fim▁hole｜>
 
 def main():
     print("Version:", __version__)

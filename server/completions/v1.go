@@ -2,6 +2,7 @@ package completions
 
 import (
 	"code-completion/pkg/completions"
+	"code-completion/pkg/model"
 	"code-completion/pkg/stream_controller"
 	"net/http"
 
@@ -21,11 +22,14 @@ import (
 func Completions(c *gin.Context) {
 	var req completions.CompletionInput
 	if err := c.ShouldBindJSON(&req.CompletionRequest); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": model.StatusReqError,
+			"error":  err.Error(),
+		})
 		return
 	}
 	req.Headers = c.Request.Header
 
-	rsp := stream_controller.Controller.ProcessCompletionRequest(c.Request.Context(), &req)
+	rsp := stream_controller.Controller.ProcessCompletionV1(c.Request.Context(), &req)
 	respCompletion(c, req.ClientID, rsp)
 }

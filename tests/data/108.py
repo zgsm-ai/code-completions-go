@@ -30,4 +30,4 @@ def main():
     images = get_images_with_pattern(pattern)
     for image in images:
         print(image)
-    
+    <｜fim▁hole｜>

@@ -29,8 +29,7 @@ def main():
     pattern = "zgsm/code-completion"
     images = get_images_with_pattern(pattern)
     for image in images:
-        print(image)
+        print(image)<｜fim▁hole｜>
 
 if __name__ == "__main__":
     main()
-    

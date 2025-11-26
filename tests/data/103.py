@@ -13,13 +13,8 @@ if this_python < min_version:
     print("ERROR: " + " ".join(message_parts))
     sys.exit(1)
 
-import os.path
-import pkgutil
-import shutil
-import tempfile
-
 def main():
     print("Python version check passed")
     print("Minimum required version: 3.9")
     print("Current version: {}.{}".format(*this_python))
-
+    <｜fim▁hole｜>

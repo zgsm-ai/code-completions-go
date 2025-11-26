@@ -1,6 +1,7 @@
 package codebase_context
 
 import (
+	"code-completion/pkg/config"
 	"context"
 	"fmt"
 	"net/http"
@@ -16,7 +17,17 @@ type ContextClient struct {
 	apiClient *APIClient
 }
 
-// NewContextClient 创建新的上下文客户端
+/**
+ * Create new context client for codebase operations
+ * @returns {ContextClient} Returns initialized context client instance
+ * @description
+ * - Creates a new context client with API client
+ * - Initializes underlying HTTP client for API communication
+ * - Used for searching codebase context and retrieving related information
+ * @example
+ * client := NewContextClient()
+ * result := client.RequestContext(ctx, "client-id", "/path", "file.go", []string{"code"}, []string{"query"}, headers)
+ */
 func NewContextClient() *ContextClient {
 	return &ContextClient{
 		apiClient: NewAPIClient(),
@@ -30,6 +41,26 @@ type SearchResult struct {
 	RelationResults   []*ResponseData
 }
 
+/**
+ * Asynchronously search for code definitions
+ * @param {context.Context} ctx - Context for request cancellation and timeout
+ * @param {string} clientID - Client identifier for the request
+ * @param {string} codebasePath - Path to the codebase being searched
+ * @param {string} filePath - Path to the file containing the code snippet
+ * @param {string} codeSnippet - Code snippet to search for definitions
+ * @param {http.Header} headers - HTTP headers for the request
+ * @param {sync.WaitGroup} wg - Wait group for synchronization
+ * @param {[]*ResponseData} results - Slice to store search results
+ * @param {int} idx - Index in results slice to store the result
+ * @description
+ * - Performs asynchronous definition search for code snippet
+ * - Updates results slice at specified index with search result
+ * - Handles errors by storing error result in results slice
+ * - Signals completion via done() on wait group
+ * @example
+ * wg.Add(1)
+ * go client.searchDefinitionAsync(ctx, "client-id", "/codebase", "file.go", "func test()", headers, &wg, results, 0)
+ */
 func (c *ContextClient) searchDefinitionAsync(ctx context.Context, clientID, codebasePath, filePath, codeSnippet string,
 	headers http.Header, wg *sync.WaitGroup, results []*ResponseData, idx int) {
 	defer wg.Done()
@@ -40,6 +71,26 @@ func (c *ContextClient) searchDefinitionAsync(ctx context.Context, clientID, cod
 	}
 }
 
+/**
+ * Asynchronously search for code relations
+ * @param {context.Context} ctx - Context for request cancellation and timeout
+ * @param {string} clientID - Client identifier for the request
+ * @param {string} codebasePath - Path to the codebase being searched
+ * @param {string} filePath - Path to the file containing the code snippet
+ * @param {string} codeSnippet - Code snippet to search for relations
+ * @param {http.Header} headers - HTTP headers for the request
+ * @param {sync.WaitGroup} wg - Wait group for synchronization
+ * @param {[]*ResponseData} results - Slice to store search results
+ * @param {int} idx - Index in results slice to store the result
+ * @description
+ * - Performs asynchronous relation search for code snippet
+ * - Updates results slice at specified index with search result
+ * - Handles errors by storing error result in results slice
+ * - Signals completion via done() on wait group
+ * @example
+ * wg.Add(1)
+ * go client.searchRelationAsync(ctx, "client-id", "/codebase", "file.go", "func test()", headers, &wg, results, 1)
+ */
 func (c *ContextClient) searchRelationAsync(ctx context.Context, clientID, codebasePath, filePath, codeSnippet string,
 	headers http.Header, wg *sync.WaitGroup, results []*ResponseData, idx int) {
 	defer wg.Done()
@@ -50,6 +101,25 @@ func (c *ContextClient) searchRelationAsync(ctx context.Context, clientID, codeb
 	}
 }
 
+/**
+ * Asynchronously search for semantic code matches
+ * @param {context.Context} ctx - Context for request cancellation and timeout
+ * @param {string} clientID - Client identifier for the request
+ * @param {string} codebasePath - Path to the codebase being searched
+ * @param {string} query - Semantic query string to search for
+ * @param {http.Header} headers - HTTP headers for the request
+ * @param {sync.WaitGroup} wg - Wait group for synchronization
+ * @param {[]*ResponseData} results - Slice to store search results
+ * @param {int} idx - Index in results slice to store the result
+ * @description
+ * - Performs asynchronous semantic search for code
+ * - Updates results slice at specified index with search result
+ * - Handles errors by storing error result in results slice
+ * - Signals completion via done() on wait group
+ * @example
+ * wg.Add(1)
+ * go client.searchSemanticAsync(ctx, "client-id", "/codebase", "database query", headers, &wg, results, 2)
+ */
 func (c *ContextClient) searchSemanticAsync(ctx context.Context, clientID, codebasePath, query string, headers http.Header,
 	wg *sync.WaitGroup, results []*ResponseData, idx int) {
 	defer wg.Done()
@@ -60,7 +130,26 @@ func (c *ContextClient) searchSemanticAsync(ctx context.Context, clientID, codeb
 	}
 }
 
-// 请求上下文信息
+/**
+ * Request context information from multiple sources
+ * @param {context.Context} ctx - Context for request cancellation and timeout
+ * @param {string} clientID - Client identifier for the request
+ * @param {string} codebasePath - Path to the codebase being searched
+ * @param {string} filePath - Path to the file being analyzed
+ * @param {[]string} codeSnippets - Array of code snippets for definition and relation search
+ * @param {[]string} queries - Array of semantic queries for semantic search
+ * @param {http.Header} headers - HTTP headers for the requests
+ * @returns {SearchResult} Returns search results containing definition, semantic and relation results
+ * @description
+ * - Performs parallel searches for definitions, relations and semantic matches
+ * - Uses goroutines for concurrent execution of different search types
+ * - Sets up timeout context based on configuration
+ * - Returns partial results if context timeout occurs
+ * - Respects configuration flags for enabling/disabling specific search types
+ * @example
+ * result := client.RequestContext(ctx, "client-id", "/codebase", "file.go",
+ *     []string{"func test()"}, []string{"database query"}, headers)
+ */
 func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePath, filePath string,
 	codeSnippets []string, queries []string, headers http.Header) *SearchResult {
 	if clientID == "" || codebasePath == "" || filePath == "" {
@@ -68,7 +157,7 @@ func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePa
 	}
 
 	// 创建上下文，设置超时
-	ctx, cancel := context.WithTimeout(ctx, contextConfig.TotalTimeout)
+	ctx, cancel := context.WithTimeout(ctx, config.Context.TotalTimeout)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -78,7 +167,7 @@ func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePa
 	semanticResults := make([]*ResponseData, len(queries))
 
 	// 定义检索
-	if len(codeSnippets) > 0 && !contextConfig.DisableDefinitionSearch {
+	if len(codeSnippets) > 0 && !config.Context.Definition.Disabled {
 		for i, codeSnippet := range codeSnippets {
 			if codeSnippet == "" {
 				continue
@@ -88,7 +177,7 @@ func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePa
 		}
 	}
 	// 调用链检索
-	if len(codeSnippets) > 0 && !contextConfig.DisableRelationSearch {
+	if len(codeSnippets) > 0 && !config.Context.Relation.Disabled {
 		for i, codeSnippet := range codeSnippets {
 			if codeSnippet == "" {
 				continue
@@ -99,7 +188,7 @@ func (c *ContextClient) RequestContext(ctx context.Context, clientID, codebasePa
 	}
 
 	// 语义检索
-	if len(queries) > 0 && !contextConfig.DisableSemanticSearch {
+	if len(queries) > 0 && !config.Context.Semantic.Disabled {
 		for i, query := range queries {
 			if query == "" {
 				continue
@@ -168,25 +257,16 @@ func (c *ContextClient) GetContext(ctx context.Context, clientID, projectPath, f
 	// 合并定义检索结果
 	for _, item := range defCodes {
 		allCodes = append(allCodes, item.FilePath, item.Content)
-		// if len(item) > 1 {
-		// 	allCodes = append(allCodes, item[1:]...)
-		// }
 	}
 
 	// 合并语义检索结果
 	for _, item := range semanticCodes {
 		allCodes = append(allCodes, item.FilePath, item.Content)
-		// if len(item) >= 2 {
-		// 	allCodes = append(allCodes, item[:2]...)
-		// }
 	}
 
 	// 合并关系检索结果
 	for _, item := range relationCodes {
 		allCodes = append(allCodes, item.FilePath, item.Content)
-		// if len(item) > 1 {
-		// 	allCodes = append(allCodes, item[1:]...)
-		// }
 	}
 
 	// 合并所有结果
@@ -205,7 +285,7 @@ func (c *ContextClient) searchDefinition(ctx context.Context, clientID, codebase
 		CodeSnippet:  codeSnippet,
 	}
 
-	return c.apiClient.DoRequest(ctx, contextConfig.CodebaseDefinitionURL, params, headers, "GET")
+	return c.apiClient.DoRequest(ctx, config.Context.Definition.Url, params, headers, "GET")
 }
 
 // 语义搜索
@@ -214,11 +294,11 @@ func (c *ContextClient) searchSemantic(ctx context.Context, clientID, codebasePa
 		ClientID:       clientID,
 		CodebasePath:   codebasePath,
 		Query:          query,
-		TopK:           contextConfig.SemanticTopK,
-		ScoreThreshold: contextConfig.SemanticScoreThreshold,
+		TopK:           config.Context.Semantic.TopK,
+		ScoreThreshold: config.Context.Semantic.ScoreThreshold,
 	}
 
-	return c.apiClient.DoRequest(ctx, contextConfig.CodebaseSemanticURL, params, headers, "POST")
+	return c.apiClient.DoRequest(ctx, config.Context.Semantic.Url, params, headers, "POST")
 }
 
 // 关系检索
@@ -228,9 +308,9 @@ func (c *ContextClient) searchRelation(ctx context.Context, clientID, codebasePa
 		CodebasePath:   codebasePath,
 		FilePath:       filePath,
 		CodeSnippet:    codeSnippet,
-		MaxLayer:       contextConfig.RelationLayer,
-		IncludeContent: contextConfig.RelationIncludeContent,
+		MaxLayer:       config.Context.Relation.Layer,
+		IncludeContent: config.Context.Relation.IncludeContent,
 	}
 
-	return c.apiClient.DoRequest(ctx, contextConfig.CodebaseRelationURL, params, headers, "GET")
+	return c.apiClient.DoRequest(ctx, config.Context.Relation.Url, params, headers, "GET")
 }

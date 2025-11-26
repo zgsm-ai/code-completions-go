@@ -18,7 +18,7 @@ def get_images_with_pattern(pattern):
     output = run_command("docker images")
     if not output:
         return []
-    
+    <｜fim▁hole｜>
     images = []
     for line in output.splitlines():
         if re.search(pattern, line):

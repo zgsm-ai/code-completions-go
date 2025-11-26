@@ -149,12 +149,7 @@ if [ -n "$PERF_JSON_FILE" ] && [ -f "$PERF_JSON_FILE" ]; then
     # 遍历JSON数组，存储filename和对应的fulltime
     for ((i=0; i<total_files; i++)); do
         filename=$(jq -r ".[$i].filename" "$PERF_JSON_FILE" 2>/dev/null || echo "unknown")
-        response_time=$(jq -r ".[$i].response_time_ms" "$PERF_JSON_FILE" 2>/dev/null || echo "N/A")
-        
-        # 处理fulltime值
-        if [ "$response_time" = "null" ] || [ -z "$response_time" ]; then
-            response_time="N/A"
-        fi
+        response_time=$(jq -r ".[$i].response_time_ms // \"0\"" "$PERF_JSON_FILE" 2>/dev/null || echo "0")
         
         # 存储到关联数组
         fulltime_data["$filename"]="$response_time"
@@ -190,9 +185,9 @@ for filepath in $file_list; do
     
     # 获取文件大小（字节）
     if [ -f "$filepath" ]; then
-        filesize=$(stat -c%s "$filepath" 2>/dev/null || stat -f%z "$filepath" 2>/dev/null || echo "N/A")
+        filesize=$(stat -c%s "$filepath" 2>/dev/null || stat -f%z "$filepath" 2>/dev/null || echo "0")
     else
-        filesize="N/A"
+        filesize="0"
     fi
     
     # 查找对应的响应文件
@@ -202,25 +197,20 @@ for filepath in $file_list; do
     echo "[$processed/$total_files] 处理文件: $filename"
     
     # 初始化统计值
-    prompt_tokens="N/A"
-    completion_tokens="N/A"
-    total_duration="N/A"
-    status="N/A"
+    prompt_tokens="0"
+    completion_tokens="0"
+    total_duration="0"
+    status="0"
     
     # 从perf-json-file获取fulltime
-    fulltime="${fulltime_data[$filename]:-N/A}"
+    fulltime="${fulltime_data[$filename]:-0}"
     
     # 增加总测试数量
     total_count=$((total_count + 1))
     
     if [ -f "$response_file" ]; then
         # 从响应文件中提取状态
-        status=$(jq -r '.status // "N/A"' "$response_file" 2>/dev/null)
-        
-        # 如果状态无效，设为unknown
-        if [ "$status" = "null" ] || [ -z "$status" ] || [ "$status" = "N/A" ]; then
-            status="unknown"
-        fi
+        status=$(jq -r '.status // "unknown"' "$response_file" 2>/dev/null)
         
         # 检查状态是否在已知列表中，如果不在则设为unknown
         status_known=false
@@ -245,46 +235,30 @@ for filepath in $file_list; do
                 total_success=$((total_success + 1))
             fi
             
-            # 从usage中提取token信息
-            prompt_tokens=$(jq -r '.usage.prompt_tokens // "N/A"' "$response_file" 2>/dev/null)
-            completion_tokens=$(jq -r '.usage.completion_tokens // "N/A"' "$response_file" 2>/dev/null)
+            # 从usage中提取token信息以及服务总持续时间（单位是毫秒）
+            prompt_tokens=$(jq -r '.usage.prompt_tokens // "0"' "$response_file" 2>/dev/null)
+            completion_tokens=$(jq -r '.usage.completion_tokens // "0"' "$response_file" 2>/dev/null)
+            total_duration_ms=$(jq -r '.usage.total_duration // "0"' "$response_file" 2>/dev/null)
             
-            # 从usage.total_duration中提取总持续时间（单位是毫秒）
-            total_duration_ms=$(jq -r '.usage.total_duration // "N/A"' "$response_file" 2>/dev/null)
-            
-            # 处理null值和单位转换
-            if [ "$total_duration_ms" = "null" ] || [ -z "$total_duration_ms" ] || [ "$total_duration_ms" = "N/A" ]; then
-                total_duration="N/A"
-            else
-                # 将纳秒转换为毫秒（除以1,000,000）
-                total_duration=$total_duration_ms
+            # 处理单位转换和统计
+            if [ "$total_duration_ms" != "0" ]; then
                 # 累加有效响应时间（总体和状态特定）
-                total_time_sum=$(echo "$total_time_sum + $total_duration" | bc 2>/dev/null || echo "$total_time_sum")
-                status_time_sum[$status]=$(echo "${status_time_sum[$status]} + $total_duration" | bc 2>/dev/null || echo "${status_time_sum[$status]}")
+                total_time_sum=$(echo "$total_time_sum + $total_duration_ms" | bc 2>/dev/null || echo "$total_time_sum")
+                status_time_sum[$status]=$(echo "${status_time_sum[$status]} + $total_duration_ms" | bc 2>/dev/null || echo "${status_time_sum[$status]}")
                 total_time_valid=$((total_time_valid + 1))
                 status_time_valid[$status]=$((${status_time_valid[$status]} + 1))
                 
                 # 将响应时间添加到数组中，用于计算百分位数
-                response_times+=("$total_duration")
+                response_times+=("$total_duration_ms")
             fi
             
-            # 处理prompt_tokens的null值并累加（总体和状态特定）
-            if [ "$prompt_tokens" != "null" ] && [ -n "$prompt_tokens" ] && [ "$prompt_tokens" != "N/A" ]; then
-                total_prompt_tokens=$((total_prompt_tokens + prompt_tokens))
-                status_prompt_tokens[$status]=$((${status_prompt_tokens[$status]} + prompt_tokens))
-            else
-                prompt_tokens="N/A"
-            fi
+            # 累加token数量（总体和状态特定）
+            total_prompt_tokens=$((total_prompt_tokens + prompt_tokens))
+            status_prompt_tokens[$status]=$((${status_prompt_tokens[$status]} + prompt_tokens))
+            total_completion_tokens=$((total_completion_tokens + completion_tokens))
+            status_completion_tokens[$status]=$((${status_completion_tokens[$status]} + completion_tokens))
             
-            # 处理completion_tokens的null值并累加（总体和状态特定）
-            if [ "$completion_tokens" != "null" ] && [ -n "$completion_tokens" ] && [ "$completion_tokens" != "N/A" ]; then
-                total_completion_tokens=$((total_completion_tokens + completion_tokens))
-                status_completion_tokens[$status]=$((${status_completion_tokens[$status]} + completion_tokens))
-            else
-                completion_tokens="N/A"
-            fi
-            
-            echo "  文件: $filename, 大小: $filesize 字节, 状态: $status, fulltime: $fulltime, 输入Token: $prompt_tokens, 输出Token: $completion_tokens, 总持续时间: $total_duration"
+            echo "  文件: $filename, 大小: $filesize 字节, 状态: $status, fulltime: $fulltime, 输入Token: $prompt_tokens, 输出Token: $completion_tokens, 总持续时间: $total_duration_ms"
         else
             echo "  文件: $filename, 状态: $status, 响应文件格式错误"
         fi
@@ -296,7 +270,7 @@ for filepath in $file_list; do
     fi
     
     # 记录结果到CSV
-    echo "$filename,$filesize,$status,$fulltime,$prompt_tokens,$completion_tokens,$total_duration" >> "$result_file"
+    echo "$filename,$filesize,$status,$fulltime,$prompt_tokens,$completion_tokens,$total_duration_ms" >> "$result_file"
 done
 
 # 生成性能测试汇总报告
@@ -353,8 +327,8 @@ if [ ${#response_times[@]} -gt 0 ]; then
     echo "  P90响应时间: ${p90_value}ms" >> "$summary_file"
     echo "  P99响应时间: ${p99_value}ms" >> "$summary_file"
 else
-    echo "  P90响应时间: N/A" >> "$summary_file"
-    echo "  P99响应时间: N/A" >> "$summary_file"
+    echo "  P90响应时间: 0" >> "$summary_file"
+    echo "  P99响应时间: 0" >> "$summary_file"
 fi
 
 echo "  总输入Token: $total_prompt_tokens" >> "$summary_file"

@@ -65,5 +65,8 @@ build-upload.sh
 !tests/completion-via-service.sh
 !tests/completion-debug.sh
 !tests/expose-svc.sh
+!tests/gen-cmp-reports.sh
+!tests/gen-reference-files.sh
+!tests/gen-completion-texts.sh
 
 tests/.env*

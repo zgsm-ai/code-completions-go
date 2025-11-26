@@ -2,6 +2,7 @@ package codebase_context
 
 import (
 	"bytes"
+	"code-completion/pkg/config"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,7 +27,7 @@ type APIClient struct {
 func NewAPIClient() *APIClient {
 	return &APIClient{
 		client: &http.Client{
-			Timeout: contextConfig.RequestTimeout,
+			Timeout: config.Context.RequestTimeout,
 		},
 	}
 }

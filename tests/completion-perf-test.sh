@@ -7,6 +7,8 @@
 COMPLETION_EXPOSE=true
 COMPLETION_URL=""
 COMPLETION_APIKEY=""
+DATA_DIR="./data"
+NO_DEBUG=false
 
 # 如果存在./.env文件，则加载它
 if [ -f "./.env" ]; then
@@ -19,15 +21,19 @@ show_help() {
     echo "用法: $0 [选项]"
     echo ""
     echo "选项:"
+    echo "  -u, --url URL    指定调用completion-via-service.sh时使用的URL，即COMPLETION_URL变量的值"
+    echo "  -d, --data DIR   指定数据目录 (默认: ./data)"
+    echo "  -k, --key KEY    指定调用completion-via-service.sh时使用的API密钥"
     echo "  --no-expose      在执行测试前不调用 expose-completion.sh 暴露服务端口 (默认: false)"
-    echo "  --key KEY        指定调用completion-via-service.sh时使用的API密钥"
-    echo "  --url URL        指定调用completion-via-service.sh时使用的URL，即COMPLETION_URL变量的值"
+    echo "  --no-debug       不打印过程中的详细信息，仅打印当前正在处理的案例"
     echo "  -h, --help       显示此帮助信息"
     echo ""
     echo "示例:"
     echo "  $0 --no-expose   # 执行测试前不暴露服务端口"
+    echo "  $0 --no-debug    # 不打印详细调试信息"
     echo "  $0 --key myapikey # 指定API密钥"
     echo "  $0 --url http://localhost:32088/v1/completions # 指定URL"
+    echo "  $0 -d ./my-data # 指定数据目录"
     echo "  $0               # 默认执行测试前先暴露服务端口"
 }
 
@@ -38,12 +44,20 @@ while [[ $# -gt 0 ]]; do
             COMPLETION_EXPOSE=false
             shift
             ;;
-        --key)
+        --no-debug)
+            NO_DEBUG=true
+            shift
+            ;;
+        -k|--key)
             COMPLETION_APIKEY="$2"
             shift 2
             ;;
-        --url)
+        -u|--url)
             COMPLETION_URL="$2"
+            shift 2
+            ;;
+        -d|--data)
+            DATA_DIR="$2"
             shift 2
             ;;
         -h|--help)
@@ -69,9 +83,18 @@ if [ ! -z "$COMPLETION_APIKEY" ]; then
     KEY_OPT="-k $COMPLETION_APIKEY"
 fi
 
+NO_DEBUG_OPT=""
+if [ "$NO_DEBUG" = true ]; then
+    NO_DEBUG_OPT="-n"
+fi
+
 # 创建结果目录
 RESULTS_DIR="completion_perf_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$RESULTS_DIR"
+
+echo "配置信息:"
+echo "  数据目录: $DATA_DIR"
+echo ""
 
 # 创建性能数据JSON文件
 PERF_DATA_FILE="$RESULTS_DIR/perf_data.json"
@@ -135,7 +158,7 @@ fi
 echo "开始串行执行LLM补全性能测试..."
 
 # 获取数据目录中的所有文件
-file_list=$(find ./data -type f | sort)
+file_list=$(find "$DATA_DIR" -type f | sort)
 total_files=$(echo "$file_list" | wc -l)
 current_test=0
 
@@ -156,40 +179,33 @@ for filepath in $file_list; do
     # 计算输入文件内容长度（字符数）
     input_length=$(wc -c < "$filepath")
     
-    # 记录开始时间
-    start_time=$(date +%s%3N)  # 毫秒级时间戳
     # 执行补全请求
     response_file="$RESULTS_DIR/${filename%.*}.json"
 
     echo "[$current_test/$total_files] 测试文件: $filename (语言: $language, 大小: ${input_length}字节)"
     
     # 构建completion-via-service.sh命令
-    cmd="./completion-via-service.sh -v -f "$filepath" -l $language -a "$COMPLETION_URL" $KEY_OPT -o "$response_file""
-    echo "  $cmd"
+    cmd="./completion-via-service.sh -v -f "$filepath" -l $language -a "$COMPLETION_URL" $KEY_OPT $NO_DEBUG_OPT -o "$response_file""
+    if [ "$NO_DEBUG" = false ]; then
+        echo "  $cmd"
+    fi
+    # 记录开始时间
+    start_time=$(date +%s%3N)  # 毫秒级时间戳
     # 使用completion-via-service.sh发送请求并保存响应
     if eval "$cmd"; then
-        # 记录结束时间
         end_time=$(date +%s%3N)
         response_time=$((end_time - start_time))
-        status="success"
-        # 尝试从响应中提取补全内容长度
-        if grep -q '"choices"' "$response_file"; then
-            # 如果是JSON响应，提取补全内容
-            completion_length=$(jq -r '.choices[0].text | length' "$response_file" 2>/dev/null || echo "0")
-        else
-            # 如果不是JSON响应，可能是错误信息
-            completion_length="0"
-            if grep -q "error\|Error\|ERROR" "$response_file"; then
-                status="error"
-            fi
+        # 尝试从响应文件中获取status值，如果没有则默认为error
+        status=$(jq -r '.status // "error"' "$response_file" 2>/dev/null || echo "error")
+        if [ "$NO_DEBUG" = false ]; then
+            cat "$response_file"
+            echo ""
         fi
-        echo "  请求成功，响应时间: ${response_time}ms, 状态: $status, 补全内容长度: $completion_length"
+        echo "  请求成功，响应时间: ${response_time}ms, 状态: $status"
     else
-        # 请求失败
         end_time=$(date +%s%3N)
         response_time=$((end_time - start_time))
         status="failed"
-        completion_length="0"
         echo "  请求失败，响应时间: ${response_time}ms"
     fi
     
@@ -209,8 +225,6 @@ for filepath in $file_list; do
     }
 EOF
     
-    # 添加延迟，避免请求过于频繁
-    sleep 1
 done
 
 # 完成JSON数组
@@ -230,10 +244,19 @@ else
     echo "expose-completion.sh 未由本脚本启动，无需停止"
 fi
 
+# 调用gen-completion-texts.sh生成补全结果文件
+echo "使用gen-completion-texts.sh生成补全结果文件..."
+if [ -f "./gen-completion-texts.sh" ]; then
+    ./gen-completion-texts.sh -d "$DATA_DIR" -r "$RESULTS_DIR"
+    echo "补全结果文件生成完成"
+else
+    echo "警告: 找不到gen-completion-texts.sh脚本，跳过补全结果文件生成"
+fi
+
 # 调用gen-completion-reports.sh生成CSV文件和性能报告
 echo "使用gen-completion-reports.sh生成CSV文件和性能报告..."
 if [ -f "./gen-completion-reports.sh" ]; then
-    ./gen-completion-reports.sh -d data -o "$RESULTS_DIR" -r "$RESULTS_DIR" -j "$PERF_DATA_FILE"
+    ./gen-completion-reports.sh -d "$DATA_DIR" -o "$RESULTS_DIR" -r "$RESULTS_DIR" -j "$PERF_DATA_FILE"
     echo "性能报告生成完成"
 else
     echo "警告: 找不到gen-completion-reports.sh脚本，跳过报告生成"

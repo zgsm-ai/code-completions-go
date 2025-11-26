@@ -21,7 +21,10 @@ import (
 func CompletionsOpenAI(c *gin.Context) {
 	var req model.CompletionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": model.StatusReqError,
+			"error":  err.Error(),
+		})
 		return
 	}
 	rsp := stream_controller.Controller.ProcessCompletionOpenAI(c.Request.Context(), &req)

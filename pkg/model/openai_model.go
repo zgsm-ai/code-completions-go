@@ -34,6 +34,24 @@ func (m *OpenAIModel) Tokenizer() *tokenizers.Tokenizer {
 
 /**
  * 获取加了FIM标记的prompt文本
+ * @param {string} prefix - 代码前缀文本
+ * @param {string} suffix - 代码后缀文本
+ * @param {string} codeContext - 代码上下文文本
+ * @param {*config.ModelConfig} cfg - 模型配置，包含FIM相关标记
+ * @returns {string} 返回添加了FIM标记的完整prompt文本
+ * @description
+ * - 按照FIM(Fill In the Middle)格式组装prompt
+ * - 使用配置中的FIM标记：FimBegin、FimHole、FimEnd
+ * - 格式为：FimBegin + codeContext + "\n" + prefix + FimHole + suffix + FimEnd
+ * - 用于支持FIM模式的代码补全
+ * @example
+ * cfg := &config.ModelConfig{
+ *     FimBegin: "<fim-prefix>",
+ *     FimHole: "<fim-suffix>",
+ *     FimEnd: "<fim-middle>",
+ * }
+ * prompt := handler.getFimPrompt("function test", "}", "context", cfg)
+ * // prompt = "<fim-prefix>context\nfunction test<fim-suffix>}<fim-middle>"
  */
 func (m *OpenAIModel) getFimPrompt(prefix, suffix, codeContext string, cfg *config.ModelConfig) string {
 	return cfg.FimBegin + codeContext + "\n" + prefix + cfg.FimHole + suffix + cfg.FimEnd
@@ -50,7 +68,7 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 			prefix = p.Prefix
 		}
 	}
-	maxTokens := min(p.MaxTokens, m.cfg.MaxOutputToken)
+	maxTokens := min(p.MaxTokens, m.cfg.MaxOutput)
 	data := map[string]interface{}{
 		"model":       m.cfg.ModelName,
 		"prompt":      prefix,
@@ -63,7 +81,7 @@ func (m *OpenAIModel) Completions(ctx context.Context, p *CompletionParameter) (
 		data["suffix"] = p.Suffix
 	}
 	var verbose CompletionVerbose
-	verbose.Id = m.cfg.ModelId
+	verbose.Id = m.cfg.ModelTitle
 	verbose.Input = data
 	// 将data转换为JSON
 	jsonData, err := json.Marshal(data)

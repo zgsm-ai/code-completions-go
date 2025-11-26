@@ -1,11 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
-#define MAX_STUDENTS 100
-#define MAX_COURSES 20
-#define MAX_NAME_LENGTH 50
+#define MAX_STUDENTS 50
+#define MAX_COURSES 10
+#define MAX_NAME_LENGTH 30
 #define FILENAME "students.dat"
 
 typedef struct {
@@ -22,7 +21,6 @@ typedef struct {
     int count;
 } StudentDatabase;
 
-// Function prototypes
 void initialize_database(StudentDatabase *db);
 int add_student(StudentDatabase *db, const char *name);
 int add_score(StudentDatabase *db, int student_id, int course_index, float score);
@@ -33,18 +31,14 @@ void display_all_students(const StudentDatabase *db);
 int find_student_by_id(const StudentDatabase *db, int student_id);
 int save_database(const StudentDatabase *db, const char *filename);
 int load_database(StudentDatabase *db, const char *filename);
-void generate_random_data(StudentDatabase *db, int num_students);
 void sort_students_by_average(StudentDatabase *db);
 void search_students_by_name(const StudentDatabase *db, const char *name);
 void display_statistics(const StudentDatabase *db);
 void delete_student(StudentDatabase *db, int student_id);
-void edit_student_name(StudentDatabase *db, int student_id, const char *new_name);
 
 const char* course_names[MAX_COURSES] = {
     "Mathematics", "Physics", "Chemistry", "Biology", "Computer Science",
-    "English", "History", "Geography", "Economics", "Psychology",
-    "Statistics", "Literature", "Philosophy", "Art", "Music",
-    "Physical Education", "Engineering", "Medicine", "Law", "Business"
+    "English", "History", "Geography", "Economics", "Psychology"
 };
 
 int main() {
@@ -59,11 +53,7 @@ int main() {
     printf("5. Search by Name\n");
     printf("6. Sort by Average\n");
     printf("7. Display Statistics\n");
-    printf("8. Save Database\n");
-    printf("9. Load Database\n");
-    printf("10. Generate Random Data\n");
-    printf("11. Delete Student\n");
-    printf("12. Edit Student Name\n");
+    printf("8. Delete Student\n");
     printf("0. Exit\n");
     
     int choice;
@@ -77,11 +67,8 @@ int main() {
                 printf("Enter student name: ");
                 scanf(" %[^\n]", name);
                 int id = add_student(&db, name);
-                if (id != -1) {
-                    printf("Student added with ID: %d\n", id);
-                } else {
-                    printf("Failed to add student. Database is full.\n");
-                }
+                if (id != -1) printf("Student added with ID: %d\n", id);
+                else printf("Failed to add student. Database is full.\n");
                 break;
             }
             case 2: {
@@ -89,7 +76,7 @@ int main() {
                 float score;
                 printf("Enter student ID: ");
                 scanf("%d", &student_id);
-                printf("Enter course index (0-19): ");
+                printf("Enter course index (0-9): ");
                 scanf("%d", &course_index);
                 printf("Enter score: ");
                 scanf("%f", &score);
@@ -97,25 +84,17 @@ int main() {
                     printf("Score added successfully.\n");
                     calculate_average(&db, student_id);
                     assign_grade(&db, student_id);
-                } else {
-                    printf("Failed to add score. Student not found.\n");
-                }
+                } else printf("Failed to add score. Student not found.\n");
                 break;
             }
-            case 3: {
-                display_all_students(&db);
-                break;
-            }
+            case 3: display_all_students(&db); break;
             case 4: {
                 int student_id;
                 printf("Enter student ID: ");
                 scanf("%d", &student_id);
                 int index = find_student_by_id(&db, student_id);
-                if (index != -1) {
-                    display_student(&db.students[index]);
-                } else {
-                    printf("Student not found.\n");
-                }
+                if (index != -1) display_student(&db.students[index]);
+                else printf("Student not found.\n");
                 break;
             }
             case 5: {
@@ -131,59 +110,16 @@ int main() {
                 display_all_students(&db);
                 break;
             }
-            case 7: {
-                display_statistics(&db);
-                break;
-            }
+            case 7: display_statistics(&db); break;
             case 8: {
-                if (save_database(&db, FILENAME)) {
-                    printf("Database saved successfully.\n");
-                } else {
-                    printf("Failed to save database.\n");
-                }
-                break;
-            }
-            case 9: {
-                if (load_database(&db, FILENAME)) {
-                    printf("Database loaded successfully.\n");
-                } else {
-                    printf("Failed to load database.\n");
-                }
-                break;
-            }
-            case 10: {
-                int num_students;
-                printf("Enter number of students to generate: ");
-                scanf("%d", &num_students);
-                generate_random_data(&db, num_students);
-                printf("Random data generated for %d students.\n", num_students);
-                break;
-            }
-            case 11: {
                 int student_id;
                 printf("Enter student ID to delete: ");
                 scanf("%d", &student_id);
                 delete_student(&db, student_id);
                 break;
             }
-            case 12: {
-                int student_id;
-                char new_name[MAX_NAME_LENGTH];
-                printf("Enter student ID: ");
-                scanf("%d", &student_id);
-                printf("Enter new name: ");
-                scanf(" %[^\n]", new_name);
-                edit_student_name(&db, student_id, new_name);
-                break;
-            }
-            case 0: {
-                printf("Exiting program.\n");
-                break;
-            }
-            default: {
-                printf("Invalid choice. Please try again.\n");
-                break;
-            }
+            case 0: printf("Exiting program.\n"); break;
+            default: printf("Invalid choice. Please try again.\n"); break;
         }
     } while (choice != 0);
     
@@ -191,13 +127,11 @@ int main() {
 }
 
 void initialize_database(StudentDatabase *db) {
-    <｜fim▁hole｜>db->count = 0;
+    db->count = 0;
 }
 
 int add_student(StudentDatabase *db, const char *name) {
-    if (db->count >= MAX_STUDENTS) {
-        return -1;
-    }
+    if (db->count >= MAX_STUDENTS) return -1;
     
     Student *student = &db->students[db->count];
     student->id = db->count + 1;
@@ -207,7 +141,6 @@ int add_student(StudentDatabase *db, const char *name) {
     student->average_score = 0.0f;
     student->grade = 'F';
     
-    // Initialize all scores to 0
     for (int i = 0; i < MAX_COURSES; i++) {
         student->scores[i] = 0.0f;
     }
@@ -218,9 +151,7 @@ int add_student(StudentDatabase *db, const char *name) {
 
 int add_score(StudentDatabase *db, int student_id, int course_index, float score) {
     int index = find_student_by_id(db, student_id);
-    if (index == -1 || course_index < 0 || course_index >= MAX_COURSES) {
-        return 0;
-    }
+    if (index == -1 || course_index < 0 || course_index >= MAX_COURSES) return 0;
     
     db->students[index].scores[course_index] = score;
     if (course_index + 1 > db->students[index].course_count) {
@@ -231,9 +162,7 @@ int add_score(StudentDatabase *db, int student_id, int course_index, float score
 
 void calculate_average(StudentDatabase *db, int student_id) {
     int index = find_student_by_id(db, student_id);
-    if (index == -1) {
-        return;
-    }
+    if (index == -1) return;
     
     Student *student = &db->students[index];
     float sum = 0.0f;
@@ -251,23 +180,15 @@ void calculate_average(StudentDatabase *db, int student_id) {
 
 void assign_grade(StudentDatabase *db, int student_id) {
     int index = find_student_by_id(db, student_id);
-    if (index == -1) {
-        return;
-    }
+    if (index == -1) return;
     
     float average = db->students[index].average_score;
     
-    if (average >= 90.0f) {
-        db->students[index].grade = 'A';
-    } else if (average >= 80.0f) {
-        db->students[index].grade = 'B';
-    } else if (average >= 70.0f) {
-        db->students[index].grade = 'C';
-    } else if (average >= 60.0f) {
-        db->students[index].grade = 'D';
-    } else {
-        db->students[index].grade = 'F';
-    }
+    if (average >= 90.0f) db->students[index].grade = 'A';
+    else if (average >= 80.0f) db->students[index].grade = 'B';
+    else if (average >= 70.0f) db->students[index].grade = 'C';
+    else if (average >= 60.0f) db->students[index].grade = 'D';
+    else db->students[index].grade = 'F';
 }
 
 void display_student(const Student *student) {
@@ -296,68 +217,29 @@ void display_all_students(const StudentDatabase *db) {
 
 int find_student_by_id(const StudentDatabase *db, int student_id) {
     for (int i = 0; i < db->count; i++) {
-        if (db->students[i].id == student_id) {
-            return i;
-        }
+        if (db->students[i].id == student_id) return i;
     }
     return -1;
 }
 
 int save_database(const StudentDatabase *db, const char *filename) {
     FILE *file = fopen(filename, "wb");
-    if (file == NULL) {
-        return 0;
-    }
+    if (file == NULL) return 0;
     
     fwrite(&db->count, sizeof(int), 1, file);
     fwrite(db->students, sizeof(Student), db->count, file);
-    
     fclose(file);
     return 1;
 }
 
 int load_database(StudentDatabase *db, const char *filename) {
     FILE *file = fopen(filename, "rb");
-    if (file == NULL) {
-        return 0;
-    }
+    if (file == NULL) return 0;
     
     fread(&db->count, sizeof(int), 1, file);
     fread(db->students, sizeof(Student), db->count, file);
-    
     fclose(file);
     return 1;
-}
-
-void generate_random_data(StudentDatabase *db, int num_students) {
-    char first_names[][20] = {"John", "Jane", "Michael", "Sarah", "Robert", "Emily", 
-                              "David", "Jessica", "William", "Ashley", "James", "Amanda",
-                              "Daniel", "Jennifer", "Matthew", "Melissa", "Christopher", "Laura"};
-    char last_names[][20] = {"Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia",
-                             "Miller", "Davis", "Rodriguez", "Martinez", "Wilson", "Anderson"};
-    
-    srand(time(NULL));
-    
-    for (int i = 0; i < num_students && db->count < MAX_STUDENTS; i++) {
-        char full_name[MAX_NAME_LENGTH];
-        sprintf(full_name, "%s %s", 
-                first_names[rand() % 18], 
-                last_names[rand() % 12]);
-        
-        add_student(db, full_name);
-        int student_id = db->students[db->count - 1].id;
-        
-        // Add random scores for 3-8 courses
-        int num_courses = 3 + rand() % 6;
-        for (int j = 0; j < num_courses; j++) {
-            int course_index = rand() % MAX_COURSES;
-            float score = 50.0f + (rand() % 51); // Score between 50 and 100
-            add_score(db, student_id, course_index, score);
-        }
-        
-        calculate_average(db, student_id);
-        assign_grade(db, student_id);
-    }
 }
 
 void sort_students_by_average(StudentDatabase *db) {
@@ -396,11 +278,10 @@ void display_statistics(const StudentDatabase *db) {
     }
     
     float total_average = 0.0f;
-    int grade_counts[5] = {0}; // A, B, C, D, F
+    int grade_counts[5] = {0};
     
     for (int i = 0; i < db->count; i++) {
         total_average += db->students[i].average_score;
-        
         switch (db->students[i].grade) {
             case 'A': grade_counts[0]++; break;
             case 'B': grade_counts[1]++; break;
@@ -428,23 +309,10 @@ void delete_student(StudentDatabase *db, int student_id) {
         return;
     }
     
-    // Shift all students after the deleted one
     for (int i = index; i < db->count - 1; i++) {
         db->students[i] = db->students[i + 1];
     }
     
     db->count--;
     printf("Student with ID %d deleted successfully.\n", student_id);
-}
-
-void edit_student_name(StudentDatabase *db, int student_id, const char *new_name) {
-    int index = find_student_by_id(db, student_id);
-    if (index == -1) {
-        printf("Student not found.\n");
-        return;
-    }
-    
-    strncpy(db->students[index].name, new_name, MAX_NAME_LENGTH - 1);
-    db->students[index].name[MAX_NAME_LENGTH - 1] = '\0';
-    printf("Student name updated successfully.\n");
 }

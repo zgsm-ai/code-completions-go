@@ -23,4 +23,4 @@ def get_images_with_pattern(pattern):
     for line in output.splitlines():
         if re.search(pattern, line):
             images.append(line)
-    
+    <｜fim▁hole｜>

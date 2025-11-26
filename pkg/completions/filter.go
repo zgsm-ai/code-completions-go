@@ -1,8 +1,10 @@
 package completions
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -24,20 +26,99 @@ const (
 
 // 补全过滤器接口
 type Filter interface {
-	Judge(data *CompletionRequest) RejectCode
+	Judge(in *CompletionInput) RejectCode
 }
 
-// 语言特性过滤器
-type LanguageFeatureFilter struct {
-	codeFilters *CodeFilters
+// 补全拒绝规则链
+type FilterChain struct {
+	filters []Filter
 }
 
-// 创建语言特性过滤器
-func NewLanguageFeatureFilter(cfg *config.CompletionWrapperConfig) *LanguageFeatureFilter {
-	thresholdScore := cfg.ThresholdScore
-	if thresholdScore == 0 {
-		thresholdScore = 0.3
+/**
+ * Create new filter chain for completion request processing
+ * @param {config.CompletionWrapperConfig} cfg - Configuration wrapper containing filter settings
+ * @returns {FilterChain} Returns configured filter chain instance
+ * @description
+ * - Creates a chain of filters to evaluate completion requests
+ * - Adds hidden score filter if not disabled in configuration
+ * - Adds language feature filter if not disabled in configuration
+ * - Filters are executed in the order they are added
+ * @example
+ * chain := NewFilterChain(config)
+ * err := chain.Handle(request)
+ * if err != nil {
+ *     // Handle rejection
+ * }
+ */
+func NewFilterChain(cfg *config.WrapperConfig) *FilterChain {
+	handlers := make([]Filter, 0)
+
+	if !cfg.Score.Disabled {
+		handlers = append(handlers, NewScoreFilter(&cfg.Score))
 	}
+
+	if !cfg.Syntax.Disabled {
+		handlers = append(handlers, NewSyntaxFilter(&cfg.Syntax))
+	}
+
+	return &FilterChain{
+		filters: handlers,
+	}
+}
+
+/**
+ * Handle completion request through filter chain
+ * @param {CompletionInput} in - Completion request data to be evaluated
+ * @returns {error} Returns error if any filter rejects the request, nil if all filters accept
+ * @description
+ * - Processes completion request through all filters in the chain
+ * - Stops processing and returns error on first filter rejection
+ * - Request must pass all filters to be accepted
+ * - Returns specific error message indicating which filter rejected the request
+ * @example
+ * err := chain.Handle(request)
+ * if err != nil {
+ *     log.Printf("Request rejected: %v", err)
+ * }
+ */
+func (c *FilterChain) Handle(in *CompletionInput) error {
+	for _, handler := range c.filters {
+		if rejectCode := handler.Judge(in); rejectCode != Accepted {
+			return fmt.Errorf("%s", rejectCode)
+		}
+	}
+	return nil
+}
+
+//------------------------------------------------------------------------------
+//	CodeFilters
+//------------------------------------------------------------------------------
+
+// 代码过滤器
+type CodeFilters struct {
+	StrPattern    string
+	TreePattern   string
+	FIMIndicator  string
+	EndTag        string
+	MinPromptLine int
+}
+
+/**
+ * Create language feature filter for completion requests
+ * @param {config.SyntaxFilterConfig} cfg - Configuration wrapper containing filter settings
+ * @returns {CodeFilters} Returns configured language feature filter instance
+ * @description
+ * - Creates a language feature filter to determine if code completion should be triggered
+ * - Sets up threshold score, string pattern, tree pattern, line count threshold and end tag
+ * - Uses default values if not provided in configuration
+ * @example
+ * filter := NewSyntaxFilter(config)
+ * rejectCode := filter.Judge(request)
+ * if rejectCode == Accepted {
+ *     // Process completion
+ * }
+ */
+func NewSyntaxFilter(cfg *config.SyntaxFilterConfig) *CodeFilters {
 	strPattern := cfg.StrPattern
 	if strPattern == "" {
 		strPattern = `import +.*|from +.*|from +.* import *.*`
@@ -47,9 +128,9 @@ func NewLanguageFeatureFilter(cfg *config.CompletionWrapperConfig) *LanguageFeat
 	if treePattern == "" {
 		treePattern = `\(comment.*|\(string.*|\(set \(string.*|\(dictionary.*|\(integer.*|\(list.*|\(tuple.*`
 	}
-	lineCountThreshold := cfg.LineCountThreshold
-	if lineCountThreshold == 0 {
-		lineCountThreshold = 5
+	minPromptLine := cfg.MinPromptLine
+	if minPromptLine == 0 {
+		minPromptLine = 5
 	}
 
 	endTag := cfg.EndTag
@@ -57,155 +138,80 @@ func NewLanguageFeatureFilter(cfg *config.CompletionWrapperConfig) *LanguageFeat
 		endTag = "('>',';','}',')')"
 	}
 
-	return &LanguageFeatureFilter{
-		codeFilters: NewCodeFilters(
-			thresholdScore,
-			lineCountThreshold,
-			strPattern,
-			treePattern,
-			endTag,
-		),
+	return NewCodeFilters(minPromptLine, strPattern, treePattern, endTag)
+}
+
+/**
+ * Create code filters for completion request evaluation
+ * @param {int} MinPromptLine - Minimum line count threshold
+ * @param {string} strPattern - String pattern for code analysis
+ * @param {string} treePattern - Tree pattern for code analysis
+ * @param {string} endTag - End tag pattern for cursor position detection
+ * @returns {CodeFilters} Returns configured code filters instance
+ * @description
+ * - Creates code filters with specified configuration parameters
+ * - Sets up patterns and thresholds for code completion evaluation
+ * - Initializes FIM indicator for fill-in-middle completion detection
+ * @example
+ * filters := NewCodeFilters(0.3, 5, "import.*", ".*", "';','}'")
+ * needCode := filters.NeedCode(request)
+ */
+func NewCodeFilters(minPromptLine int, strPattern, treePattern, endTag string) *CodeFilters {
+	return &CodeFilters{
+		StrPattern:    strPattern,
+		TreePattern:   treePattern,
+		FIMIndicator:  "<FILL_HERE>",
+		EndTag:        endTag,
+		MinPromptLine: minPromptLine,
 	}
 }
 
-func (h *LanguageFeatureFilter) Judge(data *CompletionRequest) RejectCode {
+/**
+ * Determine if code completion is needed for the request
+ * @param {CompletionInput} in - Completion request data containing code context
+ * @returns {bool} Returns true if code completion is needed, false otherwise
+ * @description
+ * - Checks if cursor is at the end of line (no completion needed)
+ * - Checks if text after fill position starts with a word (no completion needed)
+ * - Returns true if none of the rejection conditions are met
+ * - Simplified implementation with basic filtering logic
+ * @example
+ * if filters.NeedCode(request) {
+ *     // Process code completion
+ * }
+ */
+func (c *CodeFilters) Judge(in *CompletionInput) RejectCode {
 	// 跳过手动触发模式
-	if strings.ToUpper(data.TriggerMode) == "MANUAL" {
-		return Accepted
-	}
-
-	// 检查是否需要代码补全
-	if h.codeFilters.NeedCode(data) {
-		return Accepted
-	}
-
-	return FeatureNotSupport
-}
-
-// 低隐藏分数过滤器
-type HiddenScoreFilter struct {
-	hideScoreConfig *HideScoreConfig
-}
-
-// 创建隐藏分数过滤器
-func NewHiddenScoreFilter(cfg *config.CompletionWrapperConfig) *HiddenScoreFilter {
-	thresholdScore := cfg.ThresholdScore
-	if thresholdScore == 0 {
-		thresholdScore = 0.3
-	}
-
-	return &HiddenScoreFilter{
-		hideScoreConfig: NewHideScoreConfig("./config/hide_score.yml", thresholdScore),
-	}
-}
-
-func (h *HiddenScoreFilter) Judge(data *CompletionRequest) RejectCode {
-	// 跳过手动触发和继续补全模式
-	mode := strings.ToUpper(data.TriggerMode)
+	mode := strings.ToUpper(in.TriggerMode)
 	if mode == "MANUAL" || mode == "CONTINUE" {
 		return Accepted
 	}
-
-	// 计算隐藏分数
-	if data.CalculateHideScore == nil {
-		return Accepted
+	if c.cursorIsAtTheEnd(in) {
+		return FeatureNotSupport
 	}
 
-	score := 0.0
-	if data.CalculateHideScore.DocumentLength != 0 {
-		if data.PromptOptions != nil {
-			data.CalculateHideScore.Prefix = data.PromptOptions.Prefix
-		}
-		score = h.hideScoreConfig.CalculateHideScore(data.CalculateHideScore, data.LanguageID)
+	if c.textAfterFillHereStartWithWord(in) {
+		return FeatureNotSupport
 	}
-
-	// 将分数更新到请求数据中（问题4修复）
-	if data.Extra == nil {
-		data.Extra = make(map[string]interface{})
-	}
-	data.Extra["score"] = score
-
-	// 通过配置阈值来过滤隐藏分低的补全
-	if score < h.hideScoreConfig.ThresholdScore {
-		// 添加日志记录（问题1修复）
-		logger.Debug("低隐藏分数拒绝补全",
-			zap.Float64("score", score),
-			zap.Float64("threshold", h.hideScoreConfig.ThresholdScore),
-			zap.String("completion_id", data.CompletionID),
-			zap.String("language", data.LanguageID))
-		return LowHiddenScore
-	}
+	// 简化实现，其他复杂的过滤逻辑暂时关闭
+	// 可以根据需要逐步启用其他过滤条件
 
 	return Accepted
 }
 
-// 补全拒绝规则链
-type FilterChain struct {
-	filters []Filter
-}
-
-// 创建新的拒绝规则链
-func NewFilterChain(cfg *config.CompletionWrapperConfig) *FilterChain {
-	handlers := make([]Filter, 0)
-
-	if !cfg.DisableScore {
-		handlers = append(handlers, NewHiddenScoreFilter(cfg))
-	}
-
-	if !cfg.DisableLanguageFeature {
-		handlers = append(handlers, NewLanguageFeatureFilter(cfg))
-	}
-
-	return &FilterChain{
-		filters: handlers,
-	}
-}
-
-// 处理补全请求，只要命中一个规则就拒绝补全
-func (c *FilterChain) Handle(data *CompletionRequest) error {
-	for _, handler := range c.filters {
-		if rejectCode := handler.Judge(data); rejectCode != Accepted {
-			return fmt.Errorf("%s", rejectCode)
-		}
-	}
-	return nil
-}
-
-// CodeFilters 代码过滤器
-type CodeFilters struct {
-	ThresholdScore     float64
-	StrPattern         string
-	TreePattern        string
-	FIMIndicator       string
-	EndTag             string
-	LineCountThreshold int
-}
-
-// 创建代码过滤器
-func NewCodeFilters(thresholdScore float64, lineCountThreshold int, strPattern, treePattern, endTag string) *CodeFilters {
-	return &CodeFilters{
-		ThresholdScore:     thresholdScore,
-		StrPattern:         strPattern,
-		TreePattern:        treePattern,
-		FIMIndicator:       "<FILL_HERE>",
-		EndTag:             endTag,
-		LineCountThreshold: lineCountThreshold,
-	}
-}
-
-func (c *CodeFilters) NeedCode(data *CompletionRequest) bool {
+func (c *CodeFilters) NeedCode(in *CompletionInput) bool {
 	// 是否需要触发模型进行自动补全编码
 
 	// 暂时关闭，参考相关文档
-	// if c.tooFewLines(data) {
+	// if c.tooFewLines(in) {
 	//     return false
 	// }
 
-	if c.cursorIsAtTheEnd(data) {
+	if c.cursorIsAtTheEnd(in) {
 		return false
 	}
 
-	if c.textAfterFillHereStartWithWord(data) {
+	if c.textAfterFillHereStartWithWord(in) {
 		return false
 	}
 
@@ -215,6 +221,17 @@ func (c *CodeFilters) NeedCode(data *CompletionRequest) bool {
 	return true
 }
 
+/**
+ * Split prompt into text before and after cursor position
+ * @param {string} prompt - Complete prompt text containing FIM indicator
+ * @returns {string, string} Returns text before cursor and text after cursor
+ * @description
+ * - Splits prompt text at FIM indicator position
+ * - Returns empty strings if FIM indicator is not found
+ * - Handles cases where FIM indicator appears multiple times
+ * @example
+ * before, after := filters.splitPrompt("code before <FILL_HERE> code after")
+ */
 func (c *CodeFilters) splitPrompt(prompt string) (string, string) {
 	textBeforeCursor, textAfterCursor := "", ""
 	if strings.Contains(prompt, c.FIMIndicator) {
@@ -230,11 +247,26 @@ func (c *CodeFilters) splitPrompt(prompt string) (string, string) {
 	return textBeforeCursor, textAfterCursor
 }
 
-func (c *CodeFilters) cursorIsAtTheEnd(data *CompletionRequest) bool {
-	// 光标位于行尾的直接不触发补全
+/**
+ * Check if cursor is at the end of a line
+ * @param {CompletionInput} in - Completion request data containing prompt
+ * @returns {bool} Returns true if cursor is at line end, false otherwise
+ * @description
+ * - Splits prompt into text before and after cursor
+ * - Parses end tags from configuration
+ * - Checks if text before cursor ends with any configured end tag
+ * - Verifies that text after cursor starts with empty line
+ * - Returns true if all conditions indicate cursor is at line end
+ * @example
+ * if filters.cursorIsAtTheEnd(request) {
+ *     // Skip completion
+ * }
+ */
+func (c *CodeFilters) cursorIsAtTheEnd(in *CompletionInput) bool {
+	// 光标位于有效行行尾的直接不触发补全
 	// 行尾定义：光标左侧是'>'、';'、'}'、')'，右侧是换行符号
 
-	textBeforeCursor, textAfterCursor := c.splitPrompt(data.Prompt)
+	textBeforeCursor, textAfterCursor := c.splitPrompt(in.Processed.Prefix)
 	if textBeforeCursor != "" && textAfterCursor != "" {
 		// 解析endTag
 		endTags := c.parseEndTag()
@@ -252,6 +284,18 @@ func (c *CodeFilters) cursorIsAtTheEnd(data *CompletionRequest) bool {
 	return false
 }
 
+/**
+ * Parse end tag configuration string into individual tags
+ * @returns {[]string} Returns slice of parsed end tags
+ * @description
+ * - Parses end tag configuration string in format "('>',';','}',')')"
+ * - Removes parentheses and quotes from configuration
+ * - Splits string by comma separator
+ * - Returns slice of cleaned end tags
+ * @example
+ * tags := filters.parseEndTag()
+ * // tags will be ["\u003e", ";", "}", ")"]
+ */
 func (c *CodeFilters) parseEndTag() []string {
 	// 解析endTag配置，格式如 "('>',';','}',')')"
 	endTag := strings.TrimSpace(c.EndTag)
@@ -271,9 +315,23 @@ func (c *CodeFilters) parseEndTag() []string {
 	return result
 }
 
-func (c *CodeFilters) textAfterFillHereStartWithWord(data *CompletionRequest) bool {
+/**
+ * Check if text after fill position starts with a word character
+ * @param {CompletionInput} in - Completion request data containing prompt
+ * @returns {bool} Returns true if text after fill starts with word character, false otherwise
+ * @description
+ * - Extracts text after cursor position from prompt
+ * - Checks if first character is letter (a-z, A-Z) or digit (0-9)
+ * - Returns true if text after cursor starts with word character
+ * - Used to skip completion when modifying variable names
+ * @example
+ * if filters.textAfterFillHereStartWithWord(request) {
+ *     // Skip completion (likely variable name modification)
+ * }
+ */
+func (c *CodeFilters) textAfterFillHereStartWithWord(in *CompletionInput) bool {
 	// 补全后面直接是英文字母开头或数字的不补全，比如修改变量名称的场景
-	_, textAfterCursor := c.splitPrompt(data.Prompt)
+	_, textAfterCursor := c.splitPrompt(in.Processed.Prefix)
 	if textAfterCursor != "" {
 		firstChar := textAfterCursor[0]
 		if (firstChar >= 'a' && firstChar <= 'z') || (firstChar >= 'A' && firstChar <= 'Z') || (firstChar >= '0' && firstChar <= '9') {
@@ -284,9 +342,24 @@ func (c *CodeFilters) textAfterFillHereStartWithWord(data *CompletionRequest) bo
 	return false
 }
 
-func (c *CodeFilters) tooFewLines(data *CompletionRequest) bool {
+/**
+ * Check if prompt contains too few lines for completion
+ * @param {CompletionInput} in - Completion request data containing prompt
+ * @returns {bool} Returns true if prompt has too few lines, false otherwise
+ * @description
+ * - Splits prompt into individual lines
+ * - Filters out empty lines from line count
+ * - Compares non-empty line count with configured threshold
+ * - Returns true if line count is below threshold
+ * - Currently disabled implementation (always returns false)
+ * @example
+ * if filters.tooFewLines(request) {
+ *     // Skip completion (insufficient context)
+ * }
+ */
+func (c *CodeFilters) tooFewLines(in *CompletionInput) bool {
 	// prompt行数太少不触发补全，排除空行场景
-	lines := strings.Split(data.Prompt, "\n")
+	lines := strings.Split(in.Processed.Prefix, "\n")
 	nonEmptyLines := make([]string, 0)
 	for _, line := range lines {
 		if strings.TrimSpace(line) != "" {
@@ -294,15 +367,19 @@ func (c *CodeFilters) tooFewLines(data *CompletionRequest) bool {
 		}
 	}
 	lineCount := len(nonEmptyLines)
-	if lineCount < c.LineCountThreshold {
-		// fmt.Printf("prompt行数%d小于阈值%d，跳过自动补全\n", lineCount, c.LineCountThreshold)
+	if lineCount < c.MinPromptLine {
+		// fmt.Printf("prompt行数%d小于阈值%d，跳过自动补全\n", lineCount, c.MinPromptLine)
 		return true
 	}
 	return false
 }
 
-// HideScoreConfig 隐藏分数配置
-type HideScoreConfig struct {
+//------------------------------------------------------------------------------
+//	HiddenScoreFilter
+//------------------------------------------------------------------------------
+
+// 低隐藏分数过滤器
+type HiddenScoreFilter struct {
 	ThresholdScore                  float64
 	ContextualFilterLanguageMap     map[string]int
 	ContextualFilterWeights         []float64
@@ -311,10 +388,118 @@ type HideScoreConfig struct {
 	ContextualFilterCharacterMap    map[string]int
 }
 
-// NewHideScoreConfig 创建隐藏分数配置
-func NewHideScoreConfig(configPath string, thresholdScore float64) *HideScoreConfig {
+/**
+ * Create hidden score filter for completion requests
+ * @param {config.CompletionWrapperConfig} cfg - Configuration wrapper containing filter settings
+ * @returns {HiddenScoreFilter} Returns configured hidden score filter instance
+ * @description
+ * - Creates a hidden score filter to evaluate completion request quality
+ * - Sets up threshold score for filtering low-quality completions
+ * - Initializes hide score configuration with default threshold if not provided
+ * @example
+ * filter := NewScoreFilter(config)
+ * rejectCode := filter.Judge(request)
+ * if rejectCode == Accepted {
+ *     // Process completion
+ * }
+ */
+func NewScoreFilter(cfg *config.ScoreFilterConfig) *HiddenScoreFilter {
+	thresholdScore := cfg.Threshold
+	if thresholdScore == 0 {
+		thresholdScore = 0.3
+	}
+	return NewHiddenScoreFilter("hidden-scores.json", thresholdScore)
+}
+
+/**
+ * Judge if completion request should be accepted based on hidden score
+ * @param {CompletionInput} in - Completion request data with score calculation info
+ * @returns {RejectCode} Returns AcceptCode if score is above threshold, LowHiddenScore otherwise
+ * @description
+ * - Skips filtering for manual and continue trigger modes (always accepts)
+ * - Calculates hidden score using configured algorithm
+ * - Updates request data with calculated score
+ * - Rejects completions with scores below threshold
+ * - Logs debug information for rejected completions
+ * @example
+ * rejectCode := filter.Judge(request)
+ * if rejectCode == LowHiddenScore {
+ *     log.Printf("Completion rejected due to low score")
+ * }
+ */
+func (h *HiddenScoreFilter) Judge(in *CompletionInput) RejectCode {
+	// 跳过手动触发和继续补全模式
+	mode := strings.ToUpper(in.TriggerMode)
+	if mode == "MANUAL" || mode == "CONTINUE" {
+		return Accepted
+	}
+
+	// 计算隐藏分数
+	if in.HideScores == nil {
+		return Accepted
+	}
+
+	score := 0.0
+	if in.HideScores.DocumentLength != 0 {
+		score = h.CalculateHideScore(in.HideScores, in.Processed.Prefix, in.LanguageID)
+	}
+
+	// 将分数更新到请求数据中（问题4修复）
+	if in.Extra == nil {
+		in.Extra = make(map[string]interface{})
+	}
+	in.Extra["score"] = score
+
+	// 通过配置阈值来过滤隐藏分低的补全
+	if score < h.ThresholdScore {
+		// 添加日志记录（问题1修复）
+		logger.Debug("低隐藏分数拒绝补全",
+			zap.Float64("score", score),
+			zap.Float64("threshold", h.ThresholdScore),
+			zap.String("completion_id", in.CompletionID),
+			zap.String("language", in.LanguageID))
+		return LowHiddenScore
+	}
+
+	return Accepted
+}
+
+func loadHiddenScoreFilter(configPath string) *HiddenScoreFilter {
+	bytes, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil
+	}
+	var c HiddenScoreFilter
+	if err := json.Unmarshal(bytes, &c); err != nil {
+		return nil
+	}
+	return &c
+}
+
+/**
+ * Create hide score configuration for completion filtering
+ * @param {string} configPath - Path to configuration file (currently unused)
+ * @param {float64} thresholdScore - Threshold score for filtering completions
+ * @returns {HideScoreConfig} Returns configured hide score configuration
+ * @description
+ * - Creates hide score configuration with default language and character mappings
+ * - Sets up weights for contextual filtering algorithm
+ * - Configures acceptance threshold and intercept values
+ * - Uses default threshold of 0.3 if not provided
+ * @example
+ * config := NewHiddenScoreFilter("config.yml", 0.3)
+ * score := config.CalculateHideScore(request, prefix, "python")
+ */
+func NewHiddenScoreFilter(configPath string, thresholdScore float64) *HiddenScoreFilter {
+	if thresholdScore == 0.0 {
+		thresholdScore = 0.3
+	}
+	if filter := loadHiddenScoreFilter(configPath); filter != nil {
+		filter.ThresholdScore = thresholdScore
+		return filter
+	}
 	// 默认配置，模拟YAML文件中的配置
-	config := &HideScoreConfig{
+	filter := &HiddenScoreFilter{
 		ContextualFilterLanguageMap: map[string]int{
 			"python": 0, "javascript": 1, "typescript": 2, "java": 3, "go": 4,
 			"c": 5, "cpp": 6, "csharp": 7, "php": 8, "ruby": 9,
@@ -342,32 +527,43 @@ func NewHideScoreConfig(configPath string, thresholdScore float64) *HideScoreCon
 			"$": 27, "%": 28, "^": 29, "&": 30, "|": 31, "~": 32, "`": 33,
 		},
 	}
-
-	if thresholdScore > 0 {
-		config.ThresholdScore = thresholdScore
-	} else {
-		config.ThresholdScore = 0.3
-	}
-
-	return config
+	filter.ThresholdScore = thresholdScore
+	return filter
 }
 
-func (h *HideScoreConfig) CalculateHideScore(calculateHideScore *CalculateHideScore, language string) float64 {
+/**
+ * Calculate hide score for completion request
+ * @param {HiddenScoreOptions} scores - Score calculation parameters
+ * @param {string} language - Programming language identifier
+ * @returns {float64} Returns calculated hide score between 0 and 1
+ * @description
+ * - Calculates probability of completion acceptance based on contextual features
+ * - Considers previous label, whitespace after cursor, time since last completion
+ * - Analyzes prefix and suffix lengths, document length, and cursor position
+ * - Applies language-specific weights and character-specific weights
+ * - Uses logistic function to convert weighted sum to probability
+ * @example
+ * score := filter.CalculateHideScore(request, prefix, "python")
+ * if score < 0.3 {
+ *     // Reject completion
+ * }
+ */
+func (h *HiddenScoreFilter) CalculateHideScore(scores *HiddenScoreOptions, prefix, language string) float64 {
 	// 判断光标权重
 	whitespaceAfterCursor := 0.0
-	if calculateHideScore.IsWhitespaceAfterCursor {
+	if scores.IsWhitespaceAfterCursor {
 		whitespaceAfterCursor = 1.0
 	}
 
 	// 触发时间间隔
-	timeSincePreviousLabel := float64(time.Now().Unix()*1000-calculateHideScore.PreviousLabelTimestamp) / 1000.0
+	timeSincePreviousLabel := float64(time.Now().Unix()*1000-scores.PreviousLabelTimestamp) / 1000.0
 
 	// 3.6最小值参考copilot的设置
 	timeSincePreviousLabelLog := math.Log(1.0 + math.Max(3.6, timeSincePreviousLabel))
 
 	prefixLengthLog := 0.0
 	prefixLastCharWeight := 0
-	prefixStr := calculateHideScore.Prefix
+	prefixStr := prefix
 
 	if prefixStr != "" {
 		prefixLengthLog = math.Log(1.0 + float64(h.getLastLineLength(prefixStr)))
@@ -390,9 +586,9 @@ func (h *HideScoreConfig) CalculateHideScore(calculateHideScore *CalculateHideSc
 		}
 	}
 
-	documentLengthLog := math.Log(1.0 + math.Max(float64(calculateHideScore.DocumentLength), 0.0))
-	promptEndPosLog := math.Log(1.0 + math.Max(float64(calculateHideScore.PromptEndPos), 0.0))
-	promptEndPosRatio := (float64(calculateHideScore.PromptEndPos) + 0.5) / (1.0 + float64(calculateHideScore.DocumentLength))
+	documentLengthLog := math.Log(1.0 + math.Max(float64(scores.DocumentLength), 0.0))
+	promptEndPosLog := math.Log(1.0 + math.Max(float64(scores.PromptEndPos), 0.0))
+	promptEndPosRatio := (float64(scores.PromptEndPos) + 0.5) / (1.0 + float64(scores.DocumentLength))
 
 	// 若不支持该语言，默认走python
 	languageWeight := 4 // python的默认值
@@ -405,7 +601,7 @@ func (h *HideScoreConfig) CalculateHideScore(calculateHideScore *CalculateHideSc
 
 	// 上一个标签的权重(上一次接受的话，下一次基本都会给予补全) +0.99
 	if len(h.ContextualFilterWeights) > 0 {
-		score += h.ContextualFilterWeights[0] * float64(calculateHideScore.PreviousLabel)
+		score += h.ContextualFilterWeights[0] * float64(scores.PreviousLabel)
 	}
 
 	// 当前行光标后为空的话倾向补全 + 0.7
@@ -465,7 +661,20 @@ func (h *HideScoreConfig) CalculateHideScore(calculateHideScore *CalculateHideSc
 	return probabilityAccept
 }
 
-func (h *HideScoreConfig) getLastLineLength(text string) int {
+/**
+ * Get length of the last line in text
+ * @param {string} text - Input text to analyze
+ * @returns {int} Returns length of last line, 0 if text is empty
+ * @description
+ * - Splits text into individual lines
+ * - Returns length of the last line in the text
+ * - Handles empty text by returning 0
+ * - Used for calculating prefix and suffix lengths in hide score calculation
+ * @example
+ * length := filter.getLastLineLength("line1\nline2\nlast")
+ * // length will be 4
+ */
+func (h *HiddenScoreFilter) getLastLineLength(text string) int {
 	if text == "" {
 		return 0
 	}

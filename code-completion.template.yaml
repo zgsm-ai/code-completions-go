@@ -5,52 +5,62 @@ metadata:
   namespace: costrict
 data:
   config.yaml: |
-    codebaseContext:
-      disableDefinitionSearch: true
-      disableRelationSearch: true
-      disableSemanticSearch: true
-      codebaseDefinitionURL: "http://codebase-querier-svc.costrict.svc.cluster.local:8888/codebase-indexer/api/v1/search/definition"
-      codebaseSemanticURL: "http://codebase-querier-svc.costrict.svc.cluster.local:8888/codebase-embedder/api/v1/search/semantic"
-      codebaseRelationURL: "http://codebase-querier-svc.costrict.svc.cluster.local:8888/codebase-indexer/api/v1/search/relation"
-      semanticTopK: 5
-      semanticScoreThreshold: 0.5
-      relationLayer: 3
-      relationIncludeContent: false
+    context:
+      definition:
+        disabled: true
+        url: "http://codebase-querier-svc.costrict.svc.cluster.local:8888/codebase-indexer/api/v1/search/definition"
+      semantic:
+        disabled: true
+        url: "http://codebase-querier-svc.costrict.svc.cluster.local:8888/codebase-embedder/api/v1/search/semantic"
+        topK: 5
+        scoreThreshold: 0.5
+      relation:
+        disabled: true
+        url: "http://codebase-querier-svc.costrict.svc.cluster.local:8888/codebase-indexer/api/v1/search/relation"
+        layer: 3
+        includeContent: false
       requestTimeout: 400ms
       totalTimeout: 500ms
     models:
       - completionsUrl: "${{__env_profile.completions_url}}"
         provider: deepseek
-        modelId: "default"
+        modelTitle: "default"
         modelName: "${{__env_profile.model_name}}"
         authorization: "${{__env_profile.model_authorization}}"
-        tags: 
-          - fasttransformer
+        tags:
+          - fastertransformer
           - deepseek
         timeout: 1000ms
-        maxPrefixContext: 512
-        maxSuffixContext: 50
-        maxOutputToken: 50
+        maxPrefix: 512
+        maxSuffix: 50
+        maxOutput: 50
         fimBegin: "<｜fim▁begin｜>"
         fimEnd: "<｜fim▁end｜>"
         fimHole: "<｜fim▁hole｜>"
         fimStop: ["<｜end▁of▁sentence｜>", "<|EOT|>", "▁<MID>"]
         tokenizerPath: "bin/deepseek-tokenizer/tokenizer.json"
         maxConcurrent: ${{__env_profile.model_concurrent}}
-        disablePrune: false
+        disablePrune: true
+        customPruners: []
     streamController:
       maintainInterval: 600s
-      completionTimeout: 2500ms
+      completionTimeout: 2000ms
       queueTimeout: 200ms
       cleanOlderThan: 24h
-    completionsConfig:
-      disableScore: true
-      disableLanguageFeature: false
-      thresholdScore: 0.3
-      strPattern: ".*"
-      treePattern: ".*"
-      lineCountThreshold: 100
-      endTag: "</completion>"
+    wrapper:
+      score:
+        disabled: true
+        threshold: 0.3
+      syntax:
+        disabled: false
+        threshold: 0.5
+        strPattern: ".*"
+        treePattern: ".*"
+        minPromptLine: 5
+        endTag: "</completion>"
+      prune:
+        disabled: false
+        pruners: []
 
 ---
 apiVersion: apps/v1

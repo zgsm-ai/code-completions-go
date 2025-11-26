@@ -18,7 +18,18 @@ var STR_PREFIX_CONFIG = []struct {
 	{30, 60},
 }
 
-// computePrefixSuffixMatchLength 计算字符串的最长前缀后缀匹配长度
+/**
+ * Compute the longest prefix suffix match length for a string
+ * @param {string} content - Input string to compute prefix suffix matches
+ * @returns {[]int} Returns array of match lengths for each position
+ * @description
+ * - Implements KMP algorithm's prefix function to compute longest prefix suffix matches
+ * - Returns empty array for empty input
+ * - Each position i stores the length of longest proper prefix which is also suffix
+ * @example
+ * matches := computePrefixSuffixMatchLength("ababc")
+ * // matches will be [-1, 0, 0, 1, 2]
+ */
 func computePrefixSuffixMatchLength(content string) []int {
 	if len(content) == 0 {
 		return []int{}
@@ -41,7 +52,19 @@ func computePrefixSuffixMatchLength(content string) []int {
 	return matchLengths
 }
 
-// isRepetitiveContent 判断是否为重复内容
+/**
+ * Check if content contains repetitive patterns
+ * @param {string} content - Input content to check for repetition
+ * @returns {bool} Returns true if content is repetitive, false otherwise
+ * @description
+ * - Uses prefix suffix match length to detect repetitive patterns
+ * - Checks against multiple configuration thresholds
+ * - Returns true if any configuration detects repetition
+ * @example
+ * if isRepetitiveContent("abcabcabc") {
+ *     // Content is repetitive
+ * }
+ */
 func isRepetitiveContent(content string) bool {
 	matchLengths := computePrefixSuffixMatchLength(content)
 
@@ -69,7 +92,19 @@ func isRepetitiveContent(content string) bool {
 	return false
 }
 
-// isRepetitive 判断字符串结尾是否为重复内容
+/**
+ * Check if string ending contains repetitive content
+ * @param {string} content - Input string to check for repetition
+ * @returns {bool} Returns true if ending is repetitive, false otherwise
+ * @description
+ * - Reverses string and checks for repetitive content
+ * - Also checks filtered version without empty lines
+ * - Returns true if either reversed or filtered version is repetitive
+ * @example
+ * if isRepetitive("abcabc") {
+ *     // String ending is repetitive
+ * }
+ */
 func isRepetitive(content string) bool {
 	// 反转字符串
 	reversed := reverseString(content)
@@ -83,7 +118,18 @@ func isRepetitive(content string) bool {
 	return isRepetitiveContent(reversedFiltered)
 }
 
-// reverseString 反转字符串
+/**
+ * Reverse a string character by character
+ * @param {string} s - Input string to reverse
+ * @returns {string} Returns reversed string
+ * @description
+ * - Converts string to rune array for proper Unicode handling
+ * - Swaps characters from both ends moving towards center
+ * - Handles multi-byte Unicode characters correctly
+ * @example
+ * reversed := reverseString("hello")
+ * // reversed will be "olleh"
+ */
 func reverseString(s string) string {
 	runes := []rune(s)
 	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
@@ -92,7 +138,18 @@ func reverseString(s string) string {
 	return string(runes)
 }
 
-// filterNonEmptyLines 过滤空行并反转
+/**
+ * Filter out empty lines from content
+ * @param {string} content - Input content with potentially empty lines
+ * @returns {string} Returns content with empty lines removed
+ * @description
+ * - Splits content into individual lines
+ * - Filters out lines that are empty or contain only whitespace
+ * - Joins non-empty lines back with newline separators
+ * @example
+ * filtered := filterNonEmptyLines("line1\n\nline2\n")
+ * // filtered will be "line1\nline2"
+ */
 func filterNonEmptyLines(content string) string {
 	lines := strings.Split(content, "\n")
 	var nonEmptyLines []string
@@ -104,7 +161,19 @@ func filterNonEmptyLines(content string) string {
 	return strings.Join(nonEmptyLines, "\n")
 }
 
-// containsOnlyNonAlpha 判断字符串是否仅包含非字母字符
+/**
+ * Check if string contains only non-alphabetic characters
+ * @param {string} input - Input string to check
+ * @returns {bool} Returns true if string has no alphabetic characters, false otherwise
+ * @description
+ * - Iterates through each character in the string
+ * - Returns false if any alphabetic character is found
+ * - Returns true if all characters are non-alphabetic
+ * @example
+ * if containsOnlyNonAlpha("123!@#") {
+ *     // String contains only non-alphabetic characters
+ * }
+ */
 func containsOnlyNonAlpha(input string) bool {
 	for _, c := range input {
 		if unicode.IsLetter(c) {
@@ -114,7 +183,23 @@ func containsOnlyNonAlpha(input string) bool {
 	return true
 }
 
-// checkContextIncludeText 验证text是否是上文结尾部分，以及是否是下文开头部分
+/**
+ * Check if text appears at the end of prefix or start of suffix
+ * @param {string} text - Text to check for inclusion
+ * @param {string} prefix - Prefix text to check ending
+ * @param {string} suffix - Suffix text to check beginning
+ * @returns {bool} Returns true if text is included in context, false otherwise
+ * @description
+ * - Returns true for empty text
+ * - Special handling for short texts (<= 3 chars) starting suffix
+ * - Special handling for non-alphabetic texts starting suffix
+ * - Checks if text is suffix of prefix or prefix of suffix
+ * - Also checks if text is contained in suffix lines for multi-line texts
+ * @example
+ * if checkContextIncludeText("func", "prefix func", "func suffix") {
+ *     // Text is included in context
+ * }
+ */
 func checkContextIncludeText(text, prefix, suffix string) bool {
 	if strings.TrimSpace(text) == "" {
 		return true
@@ -156,7 +241,25 @@ func checkContextIncludeText(text, prefix, suffix string) bool {
 	return false
 }
 
-// cutSuffixOverlap 去除「补全内容」与suffix的前缀重叠部分
+/**
+ * Remove overlapping content between completion text and suffix prefix
+ * @param {string} text - Completion text to be processed
+ * @param {string} prefix - Prefix text before cursor position (not used in this function)
+ * @param {string} suffix - Suffix text after cursor position
+ * @param {int} cutLine - Maximum number of lines to check for overlap
+ * @param {int} ignoreOverlapLen - Minimum overlap length to ignore (avoid false positives)
+ * @returns {string} Returns text with overlapping content removed from end
+ * @description
+ * - Removes trailing whitespace from completion text
+ * - Iteratively checks for overlap with suffix lines
+ * - For each iteration, checks overlap with suffix first line
+ * - Breaks early if suffix first line is shorter than overlap check
+ * - Avoids cutting if overlap content is too short (ignoreOverlapLen)
+ * - Processes multiple lines by removing first line from suffix and repeating
+ * @example
+ * processed := cutSuffixOverlap("completion", "prefix", "pletion suffix", 5, 3)
+ * // processed will be "com"
+ */
 func cutSuffixOverlap(text, prefix, suffix string, cutLine int, ignoreOverlapLen int) string {
 	if len(text) == 0 {
 		return text
@@ -303,7 +406,22 @@ func cutPrefixOverlap(text, prefix, suffix string, cutLine int) string {
 	return text
 }
 
-// judgePrefixFullLineRepetitive 判断补全内容是否为与前缀内容尾行完全重复
+/**
+ * Check if completion content completely repeats with prefix's last line
+ * @param {string} completionText - Completion text to check for repetition
+ * @param {string} prefix - Prefix text ending to compare with
+ * @returns {bool} Returns true if completion repeats prefix ending, false otherwise
+ * @description
+ * - Returns false for empty completion or prefix
+ * - Combines prefix last line with completion text for comparison
+ * - Filters out empty lines from both texts
+ * - Returns false if completion has more lines than prefix
+ * - Compares completion lines with corresponding prefix ending lines
+ * @example
+ * if judgePrefixFullLineRepetitive("text", "prefix text") {
+ *     // Completion completely repeats prefix ending
+ * }
+ */
 func judgePrefixFullLineRepetitive(completionText, prefix string) bool {
 	if len(prefix) == 0 || len(completionText) == 0 {
 		return false
@@ -348,7 +466,19 @@ func judgePrefixFullLineRepetitive(completionText, prefix string) bool {
 	return true
 }
 
-// cutRepetitiveText 去除补全内容中的重复内容
+/**
+ * Remove repetitive content from completion text
+ * @param {string} text - Completion text to process
+ * @returns {string} Returns text with repetitive content removed
+ * @description
+ * - Returns original text if length is 0
+ * - Only processes texts with 3 or more lines
+ * - Uses internal ratio threshold of 0.15 for repetition detection
+ * - Delegates to doCutRepetitiveText for actual processing
+ * @example
+ * processed := cutRepetitiveText("abc\nabc\nabc\ndef")
+ * // processed will remove repetitive "abc" lines
+ */
 func cutRepetitiveText(text string) string {
 	if len(text) == 0 {
 		return text
@@ -363,7 +493,21 @@ func cutRepetitiveText(text string) string {
 	return doCutRepetitiveText(text, 0.15)
 }
 
-// doCutRepetitiveText 若最长前后缀匹配长度占比超过阈值ratio，则去除补全内容中的重复内容
+/**
+ * Remove repetitive content if prefix-suffix match ratio exceeds threshold
+ * @param {string} text - Text to process for repetitive content
+ * @param {float64} ratio - Threshold ratio for detecting repetition
+ * @returns {string} Returns text with repetitive content removed
+ * @description
+ * - Returns original text if empty or only whitespace
+ * - Counts trailing newlines to preserve them after processing
+ * - Reverses text and computes prefix-suffix match lengths
+ * - Removes repetitive portion if ratio threshold is exceeded
+ * - Restores original order and trailing newlines
+ * @example
+ * processed := doCutRepetitiveText("abcabcabc", 0.15)
+ * // processed will remove repetitive pattern
+ */
 func doCutRepetitiveText(text string, ratio float64) string {
 	if strings.TrimSpace(text) == "" {
 		return text
@@ -411,7 +555,20 @@ func doCutRepetitiveText(text string, ratio float64) string {
 	return result
 }
 
-// longestCommonSubstring 计算两个字符串的最长公共子串
+/**
+ * Calculate the longest common substring between two strings
+ * @param {string} a - First string for comparison
+ * @param {string} b - Second string for comparison
+ * @returns {string} Returns longest common substring, empty string if no common substring
+ * @description
+ * - Returns empty string if either input is empty
+ * - Uses dynamic programming approach with O(m*n) complexity
+ * - Tracks maximum length and ending position of common substring
+ * - Extracts and returns the longest common substring
+ * @example
+ * lcs := longestCommonSubstring("abcdef", "xcdefx")
+ * // lcs will be "cdef"
+ */
 func longestCommonSubstring(a, b string) string {
 	m, n := len(a), len(b)
 	if m == 0 || n == 0 {
@@ -443,7 +600,24 @@ func longestCommonSubstring(a, b string) string {
 	return a[end-maxLen : end]
 }
 
-// isExtremeRepetition 判断是否存在极端重复
+/**
+ * Check for extreme repetition patterns in code
+ * @param {string} code - Code content to check for extreme repetition
+ * @returns {bool, string, int} Returns (hasExtremeRepetition, repeatedPattern, repetitionCount)
+ * @description
+ * - Returns (false, "", 0) for empty code or insufficient lines
+ * - Filters out empty lines before analysis
+ * - Requires at least 5 non-empty lines for analysis
+ * - Finds longest common substring between consecutive lines
+ * - Checks if LCS length is significant (> 5 chars and >= half line length)
+ * - Counts occurrences with same position in subsequent lines
+ * - Returns true if repetition count > 8 or > half of total lines
+ * @example
+ * hasRepetition, pattern, count := isExtremeRepetition("line1\nline1\nline1")
+ * if hasRepetition {
+ *     fmt.Printf("Pattern '%s' repeated %d times", pattern, count)
+ * }
+ */
 func isExtremeRepetition(code string) (bool, string, int) {
 	if len(code) == 0 {
 		return false, "", 0
@@ -496,7 +670,18 @@ func isExtremeRepetition(code string) (bool, string, int) {
 	return false, "", 0
 }
 
-// min 返回两个整数中的较小值
+/**
+ * Return the minimum of two integers
+ * @param {int} a - First integer to compare
+ * @param {int} b - Second integer to compare
+ * @returns {int} Returns the smaller of the two integers
+ * @description
+ * - Simple utility function for finding minimum value
+ * - Used throughout the codebase for boundary checks
+ * @example
+ * smaller := min(5, 10)
+ * // smaller will be 5
+ */
 func min(a, b int) int {
 	if a < b {
 		return a

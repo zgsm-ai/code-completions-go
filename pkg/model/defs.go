@@ -4,6 +4,7 @@ package model
 type CompletionParameter struct {
 	CompletionID string   `json:"completionID"` // 补全请求ID，用于唯一标识一次补全请求
 	ClientID     string   `json:"clientID"`     // 用户ID，唯一标识发起补全请求的用户
+	Language     string   `json:"language"`     // 编程语言
 	Model        string   `json:"model"`        // 模型
 	MaxTokens    int      `json:"max_tokens"`   // 回复内容的最大token数
 	Temperature  float32  `json:"temperature"`  // 温度
@@ -75,5 +76,5 @@ type CompletionResponse struct {
 	Model             string             `json:"model"`
 	Choices           []CompletionChoice `json:"choices"`
 	Usage             CompletionUsage    `json:"usage"`
-	SystemFingerprint string             `json:"system_fingerprint,omitemtpy"`
+	SystemFingerprint string             `json:"system_fingerprint,omitempty"`
 }
