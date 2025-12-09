@@ -31,5 +31,5 @@ func Completions(c *gin.Context) {
 	req.Headers = c.Request.Header
 
 	rsp := stream_controller.Controller.ProcessCompletionV1(c.Request.Context(), &req)
-	respCompletion(c, req.ClientID, rsp)
+	respCompletion(c, req.ClientID, "sangfor/v1", rsp)
 }

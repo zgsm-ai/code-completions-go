@@ -28,5 +28,5 @@ func CompletionsV2(c *gin.Context) {
 		return
 	}
 	rsp := stream_controller.Controller.ProcessCompletionV2(c.Request.Context(), &para)
-	respCompletion(c, para.ClientID, rsp)
+	respCompletion(c, para.ClientID, "sangfor/v2", rsp)
 }

@@ -9,15 +9,17 @@ import (
 	"go.uber.org/zap"
 )
 
-func respCompletion(c *gin.Context, clientId string, rsp *completions.CompletionResponse) {
+func respCompletion(c *gin.Context, clientId, ifId string, rsp *completions.CompletionResponse) {
 	if rsp.Status != model.StatusSuccess {
 		zap.L().Warn("completion failed", zap.String("completionID", rsp.ID),
 			zap.String("clientID", clientId),
 			zap.String("status", string(rsp.Status)),
+			zap.String("if", ifId),
 			zap.Any("response", rsp))
 	} else {
 		zap.L().Info("completion succeeded", zap.String("completionID", rsp.ID),
 			zap.String("clientID", clientId),
+			zap.String("if", ifId),
 			zap.Any("response", rsp))
 	}
 	statusCode := http.StatusOK

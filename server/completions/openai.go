@@ -28,5 +28,5 @@ func CompletionsOpenAI(c *gin.Context) {
 		return
 	}
 	rsp := stream_controller.Controller.ProcessCompletionOpenAI(c.Request.Context(), &req)
-	respCompletion(c, "", rsp)
+	respCompletion(c, "", "openai", rsp)
 }

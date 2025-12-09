@@ -5,7 +5,6 @@ Costrict code completions server for Golang.
 
 ## Development
 
-由于使用了tokenizer,只能在linux系统上开发，需要安装gcc.
 
 ### env prepare
 

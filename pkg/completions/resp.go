@@ -34,7 +34,7 @@ type CompletionChoice struct {
 }
 
 /**
- * 补全性能统计结构体
+ * 补全性能统计结构体(Compatible with openai/v1 CompletionUsage)
  * @description
  * - 记录补全请求各阶段的性能数据
  * - 包含接收时间、上下文获取时间、排队时间、LLM处理时间和总时间
@@ -69,7 +69,7 @@ type CompletionResponse struct {
 	Created int                      `json:"created"`
 	Usage   CompletionPerformance    `json:"usage"`
 	Status  model.CompletionStatus   `json:"status"`
-	Error   string                   `json:"error"`
+	Error   string                   `json:"error,omitempty"`
 	Verbose *model.CompletionVerbose `json:"verbose,omitempty"`
 }
 
