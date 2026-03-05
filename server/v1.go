@@ -1,4 +1,4 @@
-package completions
+package server
 
 import (
 	"code-completion/pkg/completions"
@@ -19,7 +19,7 @@ import (
 // @Failure 400 {object} completions.CompletionResponse
 // @Failure 500 {object} completions.CompletionResponse
 // @Router /code-completion/api/v1/completions [post]
-func Completions(c *gin.Context) {
+func CompletionsV1(c *gin.Context) {
 	var req completions.CompletionInput
 	if err := c.ShouldBindJSON(&req.CompletionRequest); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{

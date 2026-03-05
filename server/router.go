@@ -7,7 +7,6 @@ import (
 	"code-completion/pkg/logger"
 	"code-completion/pkg/metrics"
 	"code-completion/pkg/stream_controller"
-	"code-completion/server/completions"
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -48,15 +47,15 @@ func SetupRouter() *gin.Engine {
 	api.GET("/details", detailsHandler)
 
 	// 支持OPENAI标准的补全接口，默认并不开放
-	api.POST("/completions", completions.CompletionsOpenAI)
+	api.POST("/completions", CompletionsOpenAI)
 	// 补全接口 - 新版本路径（与客户端脚本保持一致）
 	completionRouter := r.Group("/code-completion")
 	completionRouter.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 		c.Next()
 	})
-	completionRouter.POST("/api/v1/completions", completions.Completions)
-	completionRouter.POST("/api/v2/completions", completions.CompletionsV2)
+	completionRouter.POST("/api/v1/completions", CompletionsV1)
+	completionRouter.POST("/api/v2/completions", CompletionsV2)
 
 	return r
 }

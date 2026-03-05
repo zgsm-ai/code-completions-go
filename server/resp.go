@@ -1,4 +1,4 @@
-package completions
+package server
 
 import (
 	"code-completion/pkg/completions"
@@ -34,9 +34,10 @@ func respCompletion(c *gin.Context, clientId, ifId string, rsp *completions.Comp
 		statusCode = http.StatusGatewayTimeout
 	case model.StatusBusy:
 		statusCode = http.StatusTooManyRequests
-	case model.StatusReqError:
-	case model.StatusRejected:
+	case model.StatusReqError, model.StatusRejected:
 		statusCode = http.StatusBadRequest
+	case model.StatusModelError, model.StatusServerError:
+		statusCode = http.StatusInternalServerError
 	default:
 		statusCode = http.StatusInternalServerError
 	}
